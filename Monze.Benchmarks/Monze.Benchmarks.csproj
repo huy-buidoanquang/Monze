@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Monze.Application\Monze.Application.csproj" />
+    <ProjectReference Include="..\Monze.Domain\Monze.Domain.csproj" />
+    <ProjectReference Include="..\Monze.Infrastructure\Monze.Infrastructure.csproj" />
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.2" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Mezon.Net.Sdk" Version="1.6.0" />
+    <PackageReference Include="Mezon.Net.Sdk.Caching.Redis" Version="1.6.0" />
+    <PackageReference Include="Mezon.Net.Sdk.Caching.Sqlite" Version="1.6.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.53.3" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Monze.Application\Monze.Application.csproj" />
+    <ProjectReference Include="..\Monze.Infrastructure\Monze.Infrastructure.csproj" />
+    <ProjectReference Include="..\Monze.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="Monze.csproj" />
+  <Project Path="Monze.Domain/Monze.Domain.csproj" />
+  <Project Path="Monze.Application/Monze.Application.csproj" />
+  <Project Path="Monze.Infrastructure/Monze.Infrastructure.csproj" />
+  <Project Path="Monze.Tests/Monze.Tests.csproj" />
+  <Project Path="Monze.Benchmarks/Monze.Benchmarks.csproj" />
+</Solution>
