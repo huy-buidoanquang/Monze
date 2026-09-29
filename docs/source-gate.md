@@ -16,4 +16,4 @@
 | `ListChannelVoiceUsers` | SDK | Có; đã xác minh live trong `*meeting now` | Agent session và summary hoàn chỉnh vẫn cần live |
 | `VoiceEnded` | plan + API đã rà trước | API không phát event này | Không chờ event này |
 
-Quyết định vì bundle dev hiện tại chưa phát actor xác thực end-to-end: welcome chỉ hiển thị embed và nút help; bật, tắt hoặc đổi nội dung phải dùng command chat đã xác thực. Local web source đã có đường `DropdownBoxSelected` đúng contract, nhưng chưa được publish và live-verified. `*monze event join`, `*monze role self` và các lệnh quản trị dùng người gửi của lệnh chat. Sau khi publish, chỉ bật control mutation nếu Chrome và PostgreSQL cùng chứng minh event server-authenticated.
+Quyết định vì bundle dev hiện tại chưa phát actor xác thực end-to-end: welcome chỉ hiển thị embed và nút help; bật, tắt hoặc đổi nội dung phải dùng command chat đã xác thực. Local web source đã có đường `DropdownBoxSelected` đúng contract, nhưng chưa được publish và live-verified. `*monze role self` và các lệnh quản trị dùng người gửi của lệnh chat. Sau khi publish, chỉ bật control mutation nếu Chrome và PostgreSQL cùng chứng minh event server-authenticated.

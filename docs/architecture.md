@@ -18,26 +18,25 @@ The runtime registers one concrete repository for each application port:
 | `IMeetingRepository` | `PostgresMeetingRepository` | Meeting state, claims, inbox and summaries |
 | `ISchedulingRepository` | `PostgresSchedulingRepository` | Durable schedule lease and occurrence state |
 | `IOutboxRepository` | `PostgresOutboxRepository` | Delivery claim, lease and completion |
-| `ICommunityRepository` | `PostgresCommunityRepository` | FAQ, events, points, wheel and topics |
 | `IAiUsageRepository` | `PostgresAiUsageRepository` | Atomic token budget |
 | `IMessageHistoryRepository` | `PostgresMessageHistoryRepository` | Message persistence policy and gap state |
 | `ICommandInboxRepository` | `PostgresCommandInboxRepository` | Command message idempotency lease |
 
-The former `IMonzeStore` aggregate was removed. This keeps dependency direction explicit, makes transaction ownership visible at the port boundary and prevents unrelated modules from depending on one large persistence surface. Community and outbox repositories use partial files only to separate closely related SQL concerns; each file still declares one type.
+The former `IMonzeStore` aggregate was removed. This keeps dependency direction explicit, makes transaction ownership visible at the port boundary and prevents unrelated modules from depending on one large persistence surface. Outbox delivery uses partial files only to separate closely related SQL concerns; each file still declares one type.
 
 Scheduled meeting delivery has a separate `IScheduledMeetingRepository` because one occurrence spans the schedule lease, `meeting_session`, `voice_claim` and announcement outbox. `PostgresScheduledMeetingRepository` commits those rows in one PostgreSQL transaction and checks the schedule lease token first. A voice claim conflict rolls back the session and outbox together; a replay after the schedule lease is cleared returns false.
 
-Community events store an optional capacity and signup status. Joining locks the selected open event row, checks the existing `(event_id, user_id)` registration, counts confirmed entries and atomically inserts either `confirmed` or `waitlisted`; replay returns an explicit duplicate result.
+Meeting notifications use `meeting_session.text_channel_id` as their delivery channel. The selected voice channel is included as the destination link in the invitation, while invitations, Agent status updates and summaries stay in the text channel that started the meeting. Cross-channel reply targets are discarded so an old voice notification cannot be reused by a text-channel summary.
 
 ## Runtime wiring
 
-`MonzeBot` consumes clan, authorization, meeting, scheduling, outbox and message-history ports. `MonzeApp` consumes the command-facing authorization, community, meeting, scheduling, outbox, AI usage and message-history ports. `MeetingMaintenanceWorker` consumes only the meeting repository and transcript client.
+`MonzeBot` consumes clan, authorization, meeting, scheduling, outbox and message-history ports. `MonzeApp` consumes authorization, meeting, scheduling, AI usage and message-history ports. `MeetingMaintenanceWorker` consumes only the meeting repository and transcript client.
 
 Every command handler claims `(clan_id, channel_id, message_id)` through `ICommandInboxRepository` before executing. A fresh lease prevents concurrent duplicate execution, a completed row suppresses replay, an exception releases the lease for retry, and a scheduled purge bounds retention. This idempotency check runs in the worker path after the realtime callback, so it does not add database work to the zero-allocation ingress callback.
 
-Event callbacks remain bounded adapters. They enqueue typed events and do not call a repository, Redis, SQLite or serializer on the callback thread. Workers own I/O and cancellation. Sensitive decisions read PostgreSQL or Mezon directly; L1/L2 cache is an optimization for read models only.
+Realtime callbacks remain bounded adapters. They enqueue typed events and do not call a repository, Redis, SQLite or serializer on the callback thread. Workers own I/O and cancellation. Sensitive decisions read PostgreSQL or Mezon directly; L1/L2 cache is an optimization for read models only.
 
-Outbox delivery claims all clans by default. The repository also accepts an optional `clan_id` predicate for isolated maintenance and integration checks without changing the production worker's global throughput path. A claim changes `pending` or an expired `sending` row to `sending` with a lease token. Completion updates the row only when that token matches, so a stale worker cannot acknowledge or reschedule a reclaimed delivery. A retry without an external message ID returns to `pending` with bounded exponential backoff; a delivery failure whose result is unknown becomes `uncertain` and requires an explicit clan-scoped resend. The PostgreSQL integration test covers concurrent claim, wrong-token completion, backoff, reclaim, external-ID precedence, cross-clan resend rejection and uncertain resend.
+Outbox delivery claims all clans by default. The repository also accepts an optional `clan_id` predicate for isolated maintenance and integration checks without changing the production worker's global throughput path. A claim changes `pending` or an expired `sending` row to `sending` with a lease token. Completion updates the row only when that token matches, so a stale worker cannot acknowledge or reschedule a reclaimed delivery. A retry without an external message ID returns to `pending` with bounded exponential backoff; a delivery failure whose result is unknown becomes `uncertain` and is left for operational reconciliation rather than blind resend. The PostgreSQL integration test covers concurrent claim, wrong-token completion, backoff, reclaim and external-ID precedence.
 
 Outbox delivery runs in its own worker loop instead of sharing the scheduling loop. A loop drains successive 256-row claims while work is available, then waits for the configured poll interval (`Monze:Outbox:PollMilliseconds`, default 250 ms). Scheduling latency therefore does not directly delay due outbox claims, while the existing per-batch concurrency limit and PostgreSQL lease tokens remain authoritative.
 

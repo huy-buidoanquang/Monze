@@ -6,10 +6,8 @@ namespace Monze.Application;
 public sealed partial class MonzeApp
 {
     private readonly IAuthorizationRepository _authorization;
-    private readonly ICommunityRepository _community;
     private readonly IMeetingRepository _meeting;
     private readonly ISchedulingRepository _scheduling;
-    private readonly IOutboxRepository _outbox;
     private readonly IAiUsageRepository _aiUsage;
     private readonly IMessageHistoryRepository _messageHistory;
     private readonly IAiProvider? _ai;
@@ -22,10 +20,8 @@ public sealed partial class MonzeApp
 
     public MonzeApp(
         IAuthorizationRepository authorization,
-        ICommunityRepository community,
         IMeetingRepository meeting,
         ISchedulingRepository scheduling,
-        IOutboxRepository outbox,
         IAiUsageRepository aiUsage,
         IMessageHistoryRepository messageHistory,
         IWelcomeDraftStore welcomeDrafts,
@@ -35,10 +31,8 @@ public sealed partial class MonzeApp
         AiExecutionOptions? aiOptions = null)
     {
         _authorization = authorization;
-        _community = community;
         _meeting = meeting;
         _scheduling = scheduling;
-        _outbox = outbox;
         _aiUsage = aiUsage;
         _messageHistory = messageHistory;
         _ai = ai;
@@ -61,30 +55,27 @@ public sealed partial class MonzeApp
         long clanId,
         long channelId,
         long userId,
-        long messageId,
         IReadOnlyList<string> args,
         CancellationToken cancellationToken,
-        Func<long, CancellationToken, Task<string>>? resolveUserLabel = null,
-        long? mentionedUserId = null)
+        long? mentionedUserId = null,
+        AiRequestContext? aiRequest = null)
         => HandleMonzeAsync(
             clanId,
             channelId,
             userId,
-            messageId,
             new CommandArguments(args),
             cancellationToken,
-            resolveUserLabel,
-            mentionedUserId);
+            mentionedUserId,
+            aiRequest);
 
     public async Task<CommandOutcome> HandleMonzeAsync(
         long clanId,
         long channelId,
         long userId,
-        long messageId,
         CommandArguments args,
         CancellationToken cancellationToken,
-        Func<long, CancellationToken, Task<string>>? resolveUserLabel = null,
-        long? mentionedUserId = null)
+        long? mentionedUserId = null,
+        AiRequestContext? aiRequest = null)
     {
         if (args.Count == 0)
         {
@@ -108,16 +99,7 @@ public sealed partial class MonzeApp
         {
             MonzeCommandNames.Setup => await SetupAsync(clanId, channelId, userId, rest, mentionedUserId, cancellationToken),
             MonzeCommandNames.Welcome => await WelcomeAsync(clanId, channelId, userId, rest, cancellationToken),
-            MonzeCommandNames.Event => await EventAsync(clanId, channelId, userId, rest, cancellationToken),
-            MonzeCommandNames.Announce => await AdminTextAsync(clanId, userId, channelId, OutboxKind.Announcement, "announce:" + messageId, rest, cancellationToken),
-            MonzeCommandNames.Outbox => await OutboxAsync(clanId, userId, rest, cancellationToken),
-            MonzeCommandNames.Faq => await FaqAsync(clanId, userId, rest, cancellationToken),
-            MonzeCommandNames.Info => await InfoAsync(clanId, rest, cancellationToken),
-            MonzeCommandNames.Points => await PointsAsync(clanId, userId, rest, cancellationToken),
-            MonzeCommandNames.Leaderboard => await LeaderboardAsync(clanId, resolveUserLabel, cancellationToken),
-            MonzeCommandNames.Spin => await SpinAsync(clanId, userId, cancellationToken),
-            MonzeCommandNames.Topic => await TopicAsync(clanId, userId, rest, cancellationToken),
-            MonzeCommandNames.Summarize or MonzeCommandNames.Translate or MonzeCommandNames.Rewrite or MonzeCommandNames.Shorten => await AiAsync(clanId, channelId, userId, module, rest, cancellationToken),
+            MonzeCommandNames.Ai => await AiAsync(clanId, channelId, userId, rest, aiRequest, cancellationToken),
             MonzeCommandNames.Role => await RoleAsync(clanId, userId, rest, cancellationToken),
             _ => Say(MonzeMessages.UnknownCommand(_commandOptions))
         };
@@ -131,9 +113,43 @@ public sealed partial class MonzeApp
         Func<CancellationToken, Task<MeetingVoiceCandidate?>> pickVoice,
         CancellationToken cancellationToken)
     {
+        if (args.Count == 0)
+        {
+            var includeAll = await _authorization.IsAdminAsync(clanId, userId, cancellationToken);
+            var schedules = await _scheduling.ListMeetingSchedulesAsync(
+                clanId,
+                channelId,
+                userId,
+                includeAll,
+                20,
+                cancellationToken);
+            return new CommandOutcome
+            {
+                Title = MonzeMessages.TitleMeeting,
+                Text = schedules.Count == 0 ? MonzeMessages.MeetingScheduleEmpty : string.Empty,
+                ShowMeetingSchedules = true,
+                MeetingSchedules = schedules
+            };
+        }
+
         if (!MeetingCommandParser.TryParse(args, out var request) || request is null)
         {
             return await HelpOutcomeAsync(clanId, userId, MonzeCommandNames.Meeting, cancellationToken);
+        }
+
+        if (request.IsCancel)
+        {
+            var includeAll = await _authorization.IsAdminAsync(clanId, userId, cancellationToken);
+            var cancelled = await _scheduling.CancelMeetingScheduleAsync(
+                clanId,
+                channelId,
+                userId,
+                includeAll,
+                request.CancelScheduleId!.Value,
+                cancellationToken);
+            return Say(cancelled ? MonzeMessages.MeetingScheduleCancelled : MonzeMessages.MeetingScheduleNotFound,
+                title: MonzeMessages.TitleMeeting,
+                tone: cancelled ? MonzeTone.Ok : MonzeTone.Warn);
         }
 
         if (request.Kind != MeetingScheduleKind.Now)
@@ -150,16 +166,23 @@ public sealed partial class MonzeApp
                 return Say(error ?? MonzeMessages.InvalidTime);
             }
 
-            await _scheduling.CreateMeetingScheduleAsync(
+            var scheduleId = await _scheduling.CreateMeetingScheduleAsync(
                 clanId,
                 channelId,
                 userId,
+                request.Name ?? "Cuộc họp",
                 request.Kind,
                 request.WhenText!,
                 timeZoneId,
                 next,
                 cancellationToken);
-            return Say(MonzeMessages.ScheduleSaved(request.Kind, next));
+            return Say(MonzeMessages.ScheduleSaved(
+                request.Name ?? "Cuộc họp",
+                scheduleId,
+                request.Kind,
+                next),
+                title: MonzeMessages.TitleMeeting,
+                tone: MonzeTone.Ok);
         }
 
         var voice = await pickVoice(cancellationToken);
@@ -174,12 +197,19 @@ public sealed partial class MonzeApp
             return Say(MonzeMessages.VoiceClaimConflict, tone: MonzeTone.Warn);
         }
 
-        return Say(MonzeMessages.MeetingSuggested(voice.Label));
+        return new CommandOutcome
+        {
+            Title = MonzeMessages.TitleMeeting,
+            Text = MonzeMessages.MeetingSuggested(voice.Label),
+            Tone = MonzeTone.Ok,
+            MeetingInvitation = new MeetingInvitation(voice.VoiceChannelId, voice.Label, SessionId: sessionId)
+        };
     }
 
     public async Task<CommandOutcome> HandleSummaryAsync(
         long clanId,
         long voiceChannelId,
+        long userId,
         IReadOnlyList<string> args,
         CancellationToken cancellationToken)
     {
@@ -190,12 +220,50 @@ public sealed partial class MonzeApp
 
         if (args.Count > 0 && args[0].Equals(MonzeCommandNames.Help, StringComparison.OrdinalIgnoreCase))
         {
-            return await HelpOutcomeAsync(clanId, 0, MonzeCommandNames.Summary, cancellationToken);
+            return await HelpOutcomeAsync(clanId, userId, MonzeCommandNames.Summary, cancellationToken);
         }
 
-        var text = await _meeting.LatestPostedSummaryAsync(clanId, voiceChannelId, cancellationToken);
-        return Say(text ?? MonzeMessages.NoSummary);
+        if (!await _authorization.IsAdminAsync(clanId, userId, cancellationToken))
+        {
+            return Say(MonzeMessages.SummaryAdminOnly, title: MonzeMessages.TitleSummary, tone: MonzeTone.Error);
+        }
+
+        if (args.Count != 1
+            || !long.TryParse(args[0], out var sessionId)
+            || sessionId <= 0)
+        {
+            return await HelpOutcomeAsync(clanId, userId, MonzeCommandNames.Summary, cancellationToken);
+        }
+
+        var summary = await _meeting.GetSummaryAsync(clanId, sessionId, cancellationToken);
+        if (summary is null)
+        {
+            return Say(MonzeMessages.NoSummary, title: MonzeMessages.TitleSummary, tone: MonzeTone.Warn);
+        }
+
+        var fields = new List<CommandField>(2)
+        {
+            new("Tóm tắt", summary.Summary)
+        };
+        if (summary.StartedAt is { } started && summary.EndedAt is { } ended)
+        {
+            fields.Insert(0, new("Thời lượng", FormatDuration(ended - started)));
+        }
+
+        return new CommandOutcome
+        {
+            Title = MonzeMessages.TitleSummary,
+            Text = string.Empty,
+            Fields = fields
+        };
     }
+
+    private static string FormatDuration(TimeSpan duration)
+        => duration.TotalHours >= 1
+            ? $"{(int)duration.TotalHours} giờ {duration.Minutes} phút"
+            : duration.TotalMinutes >= 1
+                ? $"{(int)duration.TotalMinutes} phút"
+                : $"{Math.Max(1, duration.Seconds)} giây";
 
     public async Task<CommandOutcome> SetWelcomeAsync(
         long clanId,
@@ -206,7 +274,7 @@ public sealed partial class MonzeApp
     {
         if (!await _authorization.IsAdminAsync(clanId, userId, cancellationToken))
         {
-            return Say(MonzeMessages.AdminOnly, tone: MonzeTone.Error);
+            return Say(MonzeMessages.WelcomeAdminOnly, tone: MonzeTone.Error);
         }
 
         var version = await _authorization.SetWelcomeAsync(clanId, enabled, text, cancellationToken);
@@ -230,20 +298,6 @@ public sealed partial class MonzeApp
     private static CommandOutcome Say(string text, string title = MonzeMessages.TitleMonze, MonzeTone tone = MonzeTone.Info)
         => new() { Title = title, Text = text, Tone = tone };
 
-    private async Task<CommandOutcome> InfoAsync(
-        long clanId,
-        CommandArguments rest,
-        CancellationToken cancellationToken)
-    {
-        var query = rest.Join(' ').Trim();
-        if (query.Length == 0)
-        {
-            return await HelpOutcomeAsync(clanId, 0, MonzeCommandNames.Info, cancellationToken);
-        }
-
-        return Say(await _community.FindFaqAsync(clanId, query, cancellationToken) ?? MonzeMessages.NoFaq);
-    }
-
     private async Task<CommandOutcome> HelpOutcomeAsync(
         long clanId,
         long userId,
@@ -251,18 +305,21 @@ public sealed partial class MonzeApp
         CancellationToken cancellationToken)
     {
         var isAdmin = await _authorization.IsAdminAsync(clanId, userId, cancellationToken);
+        var isOwner = await _authorization.IsOwnerAsync(clanId, userId, cancellationToken);
         var normalizedTopic = string.IsNullOrWhiteSpace(topic)
             ? string.Empty
             : MonzeCommandNames.Normalize(topic);
         return new CommandOutcome
         {
             Title = MonzeMessages.TitleHelp,
-            Text = MonzeMessages.CommandHelp(
-                normalizedTopic.Length == 0 ? MonzeCommandNames.Monze : normalizedTopic,
-                _commandOptions,
-                isAdmin),
+            // Help is rendered from HelpTopic by MonzeMessageBuilder. Keep
+            // Text empty so the legacy concatenated help string is not built
+            // on every request and cannot leak back into a single field.
+            Text = string.Empty,
             HelpTopic = normalizedTopic,
             HelpForAdmin = isAdmin,
+            HelpForOwner = isOwner,
+            CanManageWelcome = isAdmin,
             ShowHelpButtons = true
         };
     }

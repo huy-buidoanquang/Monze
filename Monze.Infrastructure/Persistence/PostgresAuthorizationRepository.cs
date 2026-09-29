@@ -95,6 +95,38 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
         return version is long value ? value : 0;
     }
 
+    public async Task<long> SetWelcomeMessageAsync(long clanId, string text, CancellationToken cancellationToken)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            INSERT INTO clan_settings(clan_id, welcome_text)
+            VALUES (@clan, @text)
+            ON CONFLICT (clan_id) DO UPDATE
+            SET welcome_text = EXCLUDED.welcome_text,
+                version = clan_settings.version + 1
+            RETURNING version;
+            """, connection);
+        command.Parameters.AddWithValue("clan", clanId);
+        command.Parameters.AddWithValue("text", text);
+        var version = await command.ExecuteScalarAsync(cancellationToken);
+        return version is long value ? value : 0;
+    }
+
+    public async Task<long> RemoveWelcomeMessageAsync(long clanId, CancellationToken cancellationToken)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            UPDATE clan_settings
+            SET welcome_text = NULL,
+                version = version + 1
+            WHERE clan_id = @clan
+            RETURNING version;
+            """, connection);
+        command.Parameters.AddWithValue("clan", clanId);
+        var version = await command.ExecuteScalarAsync(cancellationToken);
+        return version is long value ? value : 0;
+    }
+
     public async Task<long> SetWelcomeEmbedAsync(
         long clanId,
         WelcomeEmbedSettings embed,
@@ -146,6 +178,21 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
         {
             Value = JsonSerializer.Serialize(embed)
         });
+        var version = await command.ExecuteScalarAsync(cancellationToken);
+        return version is long value ? value : 0;
+    }
+
+    public async Task<long> RemoveWelcomeEmbedAsync(long clanId, CancellationToken cancellationToken)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            UPDATE clan_settings
+            SET welcome_embed = NULL,
+                version = version + 1
+            WHERE clan_id = @clan
+            RETURNING version;
+            """, connection);
+        command.Parameters.AddWithValue("clan", clanId);
         var version = await command.ExecuteScalarAsync(cancellationToken);
         return version is long value ? value : 0;
     }
@@ -227,6 +274,29 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
         return (bool?)await command.ExecuteScalarAsync(cancellationToken) ?? false;
     }
 
+    public async Task<bool> IsRoleAutomationEnabledAsync(long clanId, CancellationToken cancellationToken)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("SELECT role_enabled FROM clan_settings WHERE clan_id = @clan;", connection);
+        command.Parameters.AddWithValue("clan", clanId);
+        return (bool?)await command.ExecuteScalarAsync(cancellationToken) ?? true;
+    }
+
+    public async Task SetRoleAutomationEnabledAsync(long clanId, bool enabled, CancellationToken cancellationToken)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            INSERT INTO clan_settings(clan_id, role_enabled)
+            VALUES (@clan, @enabled)
+            ON CONFLICT (clan_id) DO UPDATE
+            SET role_enabled = EXCLUDED.role_enabled,
+                version = clan_settings.version + 1;
+            """, connection);
+        command.Parameters.AddWithValue("clan", clanId);
+        command.Parameters.AddWithValue("enabled", enabled);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task SetRoleSelfAssignableAsync(
         long clanId,
         long roleId,
@@ -249,7 +319,9 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
             SELECT r.clan_id, r.role_id, r.rule_kind, r.condition_value, r.version
             FROM role_rule r
             JOIN clan_registry c ON c.clan_id = r.clan_id
+            JOIN clan_settings s ON s.clan_id = r.clan_id
             WHERE r.clan_id = @clan
+              AND s.role_enabled
               AND r.enabled
               AND c.inactive_reason IS NULL;
             """, connection);
@@ -265,7 +337,9 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
             SELECT r.clan_id, r.role_id, r.rule_kind, r.condition_value, r.version
             FROM role_rule r
             JOIN clan_registry c ON c.clan_id = r.clan_id
+            JOIN clan_settings s ON s.clan_id = r.clan_id
             WHERE r.enabled
+              AND s.role_enabled
               AND c.inactive_reason IS NULL
             ORDER BY r.clan_id, r.role_id, r.rule_kind;
             """, connection);

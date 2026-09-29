@@ -50,46 +50,11 @@ try {
             }
         }
 
-        $eventIds = @()
-        $eventCommand = $connection.CreateCommand()
-        $eventCommand.Transaction = $transaction
-        $eventCommand.CommandText = @'
-SELECT id
-FROM community_event
-WHERE clan_id = @clan
-  AND channel_id = @channel
-  AND title IN ('Monze chrome event', 'Monze smoke test');
-'@
-        [void]$eventCommand.Parameters.AddWithValue('clan', $ClanId)
-        [void]$eventCommand.Parameters.AddWithValue('channel', $ChannelId)
-        $eventReader = $eventCommand.ExecuteReader()
-        try {
-            while ($eventReader.Read()) {
-                $eventIds += [int64]$eventReader.GetValue(0)
-            }
-        }
-        finally {
-            $eventReader.Dispose()
-            $eventCommand.Dispose()
-        }
-
-        if ($eventIds.Count -gt 0) {
-            $eventIdList = ($eventIds -join ',')
-            [void](Invoke-CleanupCommand "DELETE FROM signup_entry WHERE event_id IN ($eventIdList);")
-            [void](Invoke-CleanupCommand "DELETE FROM community_event WHERE id IN ($eventIdList);")
-        }
-
-        [void](Invoke-CleanupCommand @'
-DELETE FROM knowledge_entry
-WHERE clan_id = @clan
-  AND question IN ('Monze chrome smoke FAQ', 'onboarding');
-'@ @{ clan = $ClanId })
         [void](Invoke-CleanupCommand @'
 DELETE FROM outbox_delivery
 WHERE clan_id = @clan
   AND (body IN ('Chrome smoke notification')
-       OR body LIKE 'Monze smoke test:%'
-       OR body LIKE 'Monze chrome event:%');
+       OR body LIKE 'Monze smoke test:%');
 '@ @{ clan = $ClanId })
         [void](Invoke-CleanupCommand @'
 DELETE FROM voice_claim
@@ -106,20 +71,6 @@ DELETE FROM meeting_schedule
 WHERE clan_id = @clan
   AND channel_id = @channel;
 '@ @{ clan = $ClanId; channel = $ChannelId })
-        [void](Invoke-CleanupCommand @'
-DELETE FROM game_attempt
-WHERE clan_id = @clan AND user_id = @user;
-'@ @{ clan = $ClanId; user = $UserId })
-        [void](Invoke-CleanupCommand @'
-DELETE FROM wheel_cooldown
-WHERE clan_id = @clan AND user_id = @user;
-'@ @{ clan = $ClanId; user = $UserId })
-        [void](Invoke-CleanupCommand @'
-DELETE FROM activity_ledger
-WHERE clan_id = @clan AND user_id = @user AND source_type = 'command';
-DELETE FROM activity_balance
-WHERE clan_id = @clan AND user_id = @user;
-'@ @{ clan = $ClanId; user = $UserId })
         [void](Invoke-CleanupCommand @'
 DELETE FROM ai_usage
 WHERE clan_id = @clan AND user_id = @user;

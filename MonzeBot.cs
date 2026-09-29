@@ -33,6 +33,7 @@ public sealed partial class MonzeBot : BackgroundService
     private readonly IOutboxRepository _outbox;
     private readonly IMessageHistoryRepository _messageHistory;
     private readonly ICommandInboxRepository _commandInbox;
+    private readonly IWelcomeSetupDraftStore _welcomeSetupDrafts;
     private readonly ITranscriptClient _transcript;
     private readonly IReadModelCache _readModelCache;
     private readonly IMemoryCache _policyCache;
@@ -45,6 +46,8 @@ public sealed partial class MonzeBot : BackgroundService
     private readonly Channel<WelcomeIngressItem> _welcomeIngress;
     private readonly ConcurrentDictionary<VoiceKey, int> _voiceOccupancy = new();
     private readonly ConcurrentDictionary<long, ConcurrentDictionary<long, byte>> _voiceChannelsByClan = new();
+    private readonly ConcurrentDictionary<long, long> _welcomeChannelIds = new();
+    private readonly ConcurrentDictionary<long, byte> _voiceSnapshotReady = new();
     private readonly ConcurrentDictionary<long, SemaphoreSlim> _voiceSelectionGates = new();
     private readonly SemaphoreSlim _clanJoinGate = new(1, 1);
     private IReadOnlyList<KnownClan> _knownClans = Array.Empty<KnownClan>();
@@ -67,6 +70,7 @@ public sealed partial class MonzeBot : BackgroundService
         IOutboxRepository outbox,
         IMessageHistoryRepository messageHistory,
         ICommandInboxRepository commandInbox,
+        IWelcomeSetupDraftStore welcomeSetupDrafts,
         ITranscriptClient transcript,
         IReadModelCache readModelCache,
         IMemoryCache policyCache,
@@ -85,6 +89,7 @@ public sealed partial class MonzeBot : BackgroundService
         _outbox = outbox;
         _messageHistory = messageHistory;
         _commandInbox = commandInbox;
+        _welcomeSetupDrafts = welcomeSetupDrafts;
         _transcript = transcript;
         _readModelCache = readModelCache;
         _policyCache = policyCache;
@@ -201,11 +206,12 @@ public sealed partial class MonzeBot : BackgroundService
         else
         {
             commands.AddCommand(MonzeCommandNames.Help, HandleDirectHelpAsync);
-            foreach (var module in MonzeCommandNames.DirectModules)
-            {
-                var directModule = module;
-                commands.AddCommand(directModule, context => HandleDirectMonzeAsync(context, directModule));
-            }
+        }
+
+        foreach (var module in MonzeCommandNames.DirectModules)
+        {
+            var directModule = module;
+            commands.AddCommand(directModule, context => HandleDirectMonzeAsync(context, directModule));
         }
 
         commands.AddCommand(MonzeCommandNames.Meeting, HandleMeetingAsync);
@@ -214,20 +220,65 @@ public sealed partial class MonzeBot : BackgroundService
 
         var interactions = new InteractionRouter();
         interactions.OnButton(
-            MonzeButtonId.HelpCommands,
-            ctx => HandleHelpPageAsync(ctx, "commands"));
-        interactions.OnButton(
-            MonzeButtonId.HelpEvent,
-            ctx => HandleHelpPageAsync(ctx, "event"));
-        interactions.OnButton(
             MonzeButtonId.HelpMeeting,
             ctx => HandleHelpPageAsync(ctx, "meeting"));
+        interactions.OnButton(
+            MonzeButtonId.HelpSummary,
+            ctx => HandleHelpPageAsync(ctx, "summary"));
+        interactions.OnButton(
+            MonzeButtonId.HelpWelcome,
+            ctx => HandleHelpPageAsync(ctx, "welcome"));
+        interactions.OnButton(
+            MonzeButtonId.HelpRole,
+            ctx => HandleHelpPageAsync(ctx, "role"));
+        interactions.OnButton(
+            MonzeButtonId.HelpAi,
+            ctx => HandleHelpPageAsync(ctx, "ai"));
+        interactions.OnButton(
+            MonzeButtonId.HelpSetup,
+            ctx => HandleHelpPageAsync(ctx, "setup"));
+        interactions.OnButton(
+            MonzeButtonId.HelpClose,
+            HandleHelpCloseAsync);
+        interactions.OnButton(
+            MeetingButtonId.Refresh,
+            HandleMeetingListAsync);
+        interactions.OnButton(
+            MeetingButtonId.StartNow,
+            HandleMeetingNowInteractionAsync);
+        interactions.OnButton(
+            MeetingButtonId.Schedule,
+            HandleMeetingScheduleFormAsync);
+        interactions.OnButton(
+            MeetingButtonId.ScheduleSubmit,
+            HandleMeetingScheduleSubmitAsync);
+        interactions.OnButton(
+            MeetingButtonId.ScheduleCancel,
+            HandleMeetingScheduleCancelAsync);
+        interactions.OnButton(
+            MeetingButtonId.Help,
+            ctx => HandleHelpPageAsync(ctx, "meeting"));
+        interactions.OnButton(
+            MeetingButtonId.CancelPrefix + "*",
+            HandleMeetingCancelInteractionAsync);
         interactions.OnButton(
             MonzeButtonId.WelcomeHelp,
             HandleWelcomeSettingsAsync);
         interactions.OnButton(
                 MonzeButtonId.WelcomeSettings,
                 HandleWelcomeSettingsAsync);
+        interactions.OnButton(
+                MonzeButtonId.WelcomeGeneral,
+                ctx => HandleWelcomeSectionAsync(ctx, WelcomeSetupSection.General));
+        interactions.OnButton(
+                MonzeButtonId.WelcomeImages,
+                ctx => HandleWelcomeSectionAsync(ctx, WelcomeSetupSection.Images));
+        interactions.OnButton(
+                MonzeButtonId.WelcomeAuthorSection,
+                ctx => HandleWelcomeSectionAsync(ctx, WelcomeSetupSection.Author));
+        interactions.OnButton(
+                MonzeButtonId.WelcomeAdvanced,
+                ctx => HandleWelcomeSectionAsync(ctx, WelcomeSetupSection.Advanced));
         interactions.OnButton(
                 MonzeButtonId.WelcomePreview,
                 HandleWelcomePreviewAsync);
@@ -237,6 +288,9 @@ public sealed partial class MonzeBot : BackgroundService
         interactions.OnButton(
                 MonzeButtonId.WelcomeSavePrefix + "*",
                 HandleWelcomeSaveAsync);
+        interactions.OnButton(
+                MonzeButtonId.WelcomeCancel,
+                HandleWelcomeCancelAsync);
         client.UseInteractions(interactions);
 
         client.AgentSessionStarted += evt => EnqueueAgentAsync(evt, AgentEventKind.Started);
@@ -258,7 +312,7 @@ public sealed partial class MonzeBot : BackgroundService
         client.Disconnected += OnClientDisconnectedAsync;
         client.Reconnecting += OnClientReconnectingAsync;
         var messageWorker = ConsumeMessagesAsync(runtimeToken);
-        var agentWorker = ConsumeAgentEventsAsync(runtimeToken);
+        var agentWorker = ConsumeAgentEventsAsync(client, runtimeToken);
         var welcomeWorker = ConsumeWelcomeAsync(client, runtimeToken);
         var roleWorker = Task.CompletedTask;
         var outboxWorker = Task.CompletedTask;

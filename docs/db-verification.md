@@ -16,4 +16,4 @@ After a smoke test, remove only the named test data with:
 & .\scripts\cleanup-live-test.ps1 -ClanId <clan> -ChannelId <channel> -UserId <test-user>
 ```
 
-The checks cross-reference clan registration, welcome settings, role rules, points ledger and balance, meeting schedule kinds, meeting session status, FAQ count, topic prompts and wheel cooldowns. `-Assert` also requires an active clan, migrations 007 through 011, a settings row, at least one topic prompt, and equal ledger and balance totals. A successful UI response is not treated as proof until its corresponding row or aggregate is visible in this report.
+The checks cross-reference clan registration, welcome settings, role rules, retained meeting schedule/session state, AI channel policy, command inbox and outbox state. The schema report also verifies that retained tables are present and `-Assert` requires migration `018_remove_community_features`. It rejects obsolete outbox kinds. A successful UI response is not treated as proof until its corresponding row or aggregate is visible in this report.

@@ -49,13 +49,9 @@ public static class MeetingScheduleCalculator
     {
         next = default;
         error = null;
-        if (!DateTime.TryParse(
-                text,
-                CultureInfo.CurrentCulture,
-                DateTimeStyles.AllowWhiteSpaces,
-                out var local))
+        if (!TryParseLocalDateTime(text, out var local))
         {
-            error = "Dùng thời điểm dạng YYYY-MM-DD HH:mm.";
+            error = "Dùng thời điểm dạng dd/MM/yyyy HH:mm.";
             return false;
         }
 
@@ -87,7 +83,16 @@ public static class MeetingScheduleCalculator
     {
         next = default;
         error = null;
-        if (!TimeOnly.TryParse(text, CultureInfo.CurrentCulture, DateTimeStyles.AllowWhiteSpaces, out var time))
+        TimeOnly time;
+        if (TryParseTime(text, out var parsedTime))
+        {
+            time = parsedTime;
+        }
+        else if (TryParseLocalDateTime(text, out var localDateTime))
+        {
+            time = TimeOnly.FromDateTime(localDateTime);
+        }
+        else
         {
             error = "Dùng giờ dạng 18:00.";
             return false;
@@ -117,12 +122,22 @@ public static class MeetingScheduleCalculator
     {
         next = default;
         error = null;
-        var parts = text.Split(' ', 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length != 2 || !TryDay(parts[0], out var targetDay)
-            || !TimeOnly.TryParse(parts[1], CultureInfo.CurrentCulture, DateTimeStyles.AllowWhiteSpaces, out var time))
+        DayOfWeek targetDay;
+        TimeOnly time;
+        if (TryParseLocalDateTime(text, out var localDateTime))
         {
-            error = "Dùng thứ và giờ, ví dụ weekly 1 18:00.";
-            return false;
+            targetDay = localDateTime.DayOfWeek;
+            time = TimeOnly.FromDateTime(localDateTime);
+        }
+        else
+        {
+            var parts = text.Split(' ', 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length != 2 || !TryDay(parts[0], out targetDay)
+                || !TryParseTime(parts[1], out time))
+            {
+                error = "Dùng dd/MM/yyyy HH:mm hoặc thứ và giờ, ví dụ weekly 1 18:00.";
+                return false;
+            }
         }
 
         var localNow = TimeZoneInfo.ConvertTime(now, zone);
@@ -164,4 +179,23 @@ public static class MeetingScheduleCalculator
         };
         return day >= DayOfWeek.Sunday && day <= DayOfWeek.Saturday;
     }
+
+    private static bool TryParseLocalDateTime(string text, out DateTime local)
+    {
+        var formats = new[] { "dd/MM/yyyy HH:mm", "yyyy-MM-dd HH:mm" };
+        return DateTime.TryParseExact(
+            text,
+            formats,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AllowWhiteSpaces,
+            out local);
+    }
+
+    private static bool TryParseTime(string text, out TimeOnly time)
+        => TimeOnly.TryParseExact(
+            text,
+            ["HH:mm", "H:mm"],
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AllowWhiteSpaces,
+            out time);
 }

@@ -137,8 +137,15 @@ public sealed partial class MonzeBot
         try
         {
             var channel = await client.GetChannelAsync(item.ChannelId, cancellationToken);
-            var card = MonzeMessageBuilder.Card(item.Kind, item.Body, MonzeTone.Info);
-            var ack = await channel.SendAsync(card);
+            var content = string.IsNullOrWhiteSpace(item.ContentJson)
+                ? item.Kind.Equals("MeetingSummary", StringComparison.OrdinalIgnoreCase)
+                    ? MonzeMessageBuilder.MeetingSummary(item.Body, item.ReplyToMessageId)
+                    : MonzeMessageBuilder.Card(item.Kind, item.Body, MonzeTone.Info)
+                : Mezon.Net.Client.MessageContent.Parse(item.ContentJson);
+            var ack = await channel.SendAsync(
+                content,
+                mentionEveryone: item.MentionEveryone,
+                mentions: item.MentionEveryone ? MonzeMentionMetadata.Here : null);
             await TryCompleteOutboxAsync(
                 item.Id,
                 item.LeaseToken,
@@ -146,6 +153,14 @@ public sealed partial class MonzeBot
                 false,
                 cancellationToken,
                 null);
+            if (item.MeetingSessionId is long sessionId)
+            {
+                await _meeting.SetSessionNotificationMessageAsync(
+                    sessionId,
+                    item.ChannelId,
+                    ack.MessageId,
+                    cancellationToken);
+            }
             MonzeMetrics.OutboxDelivered.Add(1);
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)

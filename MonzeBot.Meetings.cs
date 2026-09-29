@@ -16,8 +16,11 @@ public sealed partial class MonzeBot
     private async Task HandleMeetingAsync(ICommandContext context)
         => await ExecuteCommandOnceAsync(context, () => HandleMeetingCoreAsync(context));
 
-    private async Task HandleMeetingCoreAsync(ICommandContext context)
+    private async Task HandleMeetingCoreAsync(
+        ICommandContext context,
+        IReadOnlyList<string>? commandArguments = null)
     {
+        var args = commandArguments ?? context.Args;
         var clanId = context.Clan?.Id ?? 0;
         if (clanId == 0)
         {
@@ -44,14 +47,13 @@ public sealed partial class MonzeBot
 
         try
         {
-            if (context.Args.Count > 0
-                && context.Args[0].Equals(MonzeCommandNames.Help, StringComparison.OrdinalIgnoreCase))
+            if (args.Count > 0
+                && args[0].Equals(MonzeCommandNames.Help, StringComparison.OrdinalIgnoreCase))
             {
                 var help = await _app.HandleMonzeAsync(
                     clanId,
                     context.Channel.Id,
                     context.Author.Id,
-                    context.Message.Id,
                     new CommandArguments(new[] { MonzeCommandNames.Help, MonzeCommandNames.Meeting }),
                     context.CancellationToken);
                 await context.ReplyAsync(MonzeMessageBuilder.Card(help, _commandOptions));
@@ -62,10 +64,33 @@ public sealed partial class MonzeBot
                 clanId,
                 context.Channel.Id,
                 context.Author.Id,
-                context.Args,
+                args,
                 ct => PickVoiceAsync(context, clanId, ct),
                 context.CancellationToken);
-            await context.ReplyAsync(MonzeMessageBuilder.Card(outcome, _commandOptions));
+            long? invitationMessageId = null;
+            if (outcome.MeetingInvitation is { } invitation)
+            {
+                var ack = await context.Channel.SendAsync(
+                    MonzeMessageBuilder.MeetingInvitation(invitation),
+                    mentionEveryone: true,
+                    mentions: MonzeMentionMetadata.Here);
+                invitationMessageId = ack.MessageId;
+                _logger.LogInformation(
+                    "Meeting invitation delivered to text channel {TextChannelId} for voice channel {VoiceChannelId} ({VoiceChannelLabel}); MessageId={MessageId}.",
+                    context.Channel.Id,
+                    invitation.VoiceChannelId,
+                    invitation.VoiceChannelLabel,
+                    ack.MessageId);
+            }
+            var response = await context.ReplyAsync(MonzeMessageBuilder.Card(outcome, _commandOptions));
+            if (outcome.MeetingInvitation?.SessionId is long sessionId)
+            {
+                await _meeting.SetSessionNotificationMessageAsync(
+                    sessionId,
+                    context.Channel.Id,
+                    invitationMessageId ?? response.MessageId,
+                    context.CancellationToken);
+            }
         }
         catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
         {
@@ -83,8 +108,11 @@ public sealed partial class MonzeBot
     private async Task HandleSummaryAsync(ICommandContext context)
         => await ExecuteCommandOnceAsync(context, () => HandleSummaryCoreAsync(context));
 
-    private async Task HandleSummaryCoreAsync(ICommandContext context)
+    private async Task HandleSummaryCoreAsync(
+        ICommandContext context,
+        IReadOnlyList<string>? commandArguments = null)
     {
+        var args = commandArguments ?? context.Args;
         var clanId = context.Clan?.Id ?? 0;
         if (clanId == 0)
         {
@@ -111,14 +139,13 @@ public sealed partial class MonzeBot
 
         try
         {
-            if (context.Args.Count > 0
-                && context.Args[0].Equals(MonzeCommandNames.Help, StringComparison.OrdinalIgnoreCase))
+            if (args.Count > 0
+                && args[0].Equals(MonzeCommandNames.Help, StringComparison.OrdinalIgnoreCase))
             {
                 var help = await _app.HandleMonzeAsync(
                     clanId,
                     context.Channel.Id,
                     context.Author.Id,
-                    context.Message.Id,
                     new CommandArguments(new[] { MonzeCommandNames.Help, MonzeCommandNames.Summary }),
                     context.CancellationToken);
                 await context.ReplyAsync(MonzeMessageBuilder.Card(help, _commandOptions));
@@ -128,12 +155,10 @@ public sealed partial class MonzeBot
             var outcome = await _app.HandleSummaryAsync(
                 clanId,
                 context.Channel.Id,
-                context.Args,
+                context.Author.Id,
+                args,
                 context.CancellationToken);
-            await context.ReplyAsync(MonzeMessageBuilder.Card(
-                MonzeMessages.TitleSummary,
-                outcome.Text,
-                outcome.Tone));
+            await context.ReplyAsync(MonzeMessageBuilder.Card(outcome, _commandOptions));
         }
         catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
         {
@@ -198,6 +223,8 @@ public sealed partial class MonzeBot
             return null;
         }
 
+        var activeClaims = await _meeting.ActiveVoiceClaimsAsync(clanId, cancellationToken);
+
         var listedVoiceChannels = 0;
         for (var i = 0; i < channels.Channeldesc.Count; i++)
         {
@@ -209,7 +236,7 @@ public sealed partial class MonzeBot
             listedVoiceChannels++;
             var channelId = channels.Channeldesc[i].ChannelId;
             TrackVoiceChannel(clanId, channelId);
-            if (IsEmptyVoice(clanId, channelId))
+            if (IsEmptyVoice(clanId, channelId) && !activeClaims.Contains(channelId))
             {
                 return await CreateVoiceCandidateAsync(
                     client,
@@ -228,7 +255,7 @@ public sealed partial class MonzeBot
             foreach (var pair in eventVoiceChannelIds)
             {
                 eventVoiceChannels++;
-                if (IsEmptyVoice(clanId, pair.Key))
+                if (IsEmptyVoice(clanId, pair.Key) && !activeClaims.Contains(pair.Key))
                 {
                     return await CreateVoiceCandidateAsync(
                         client,
@@ -281,6 +308,7 @@ public sealed partial class MonzeBot
         long clanId,
         CancellationToken cancellationToken)
     {
+        _voiceSnapshotReady.TryRemove(clanId, out _);
         try
         {
             if (_voiceChannelsByClan.TryGetValue(clanId, out var knownVoiceChannels))
@@ -303,6 +331,7 @@ public sealed partial class MonzeBot
                 _voiceOccupancy[key] = voice.UserIds.Count;
             }
 
+            _voiceSnapshotReady[clanId] = 0;
             return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -313,7 +342,8 @@ public sealed partial class MonzeBot
     }
 
     private bool IsEmptyVoice(long clanId, long channelId)
-        => !_voiceOccupancy.TryGetValue(new VoiceKey(clanId, channelId), out var count) || count == 0;
+        => _voiceSnapshotReady.ContainsKey(clanId)
+            && (!_voiceOccupancy.TryGetValue(new VoiceKey(clanId, channelId), out var count) || count == 0);
 
     private async Task FlushScheduledMeetingsAsync(
         MezonClient client,
@@ -363,12 +393,18 @@ public sealed partial class MonzeBot
                     next = nextRun;
                 }
 
+                var invitation = new MeetingInvitation(
+                    voice.VoiceChannelId,
+                    voice.Label,
+                    schedule.Name);
                 var committed = await _scheduledMeeting.CommitScheduledMeetingAsync(
                     schedule,
                     voice.VoiceChannelId,
                     DateTimeOffset.UtcNow.AddMinutes(20),
                     next,
-                    $"Meeting đã được gợi ý ở phòng voice {voice.Label}. Hãy bật Agent.",
+                    $"Đã gửi lời mời cuộc họp \"{schedule.Name}\" vào phòng {voice.Label}.",
+                    MonzeMessageBuilder.MeetingInvitation(invitation).ToJson(),
+                    mentionEveryone: true,
                     cancellationToken);
                 if (!committed)
                 {

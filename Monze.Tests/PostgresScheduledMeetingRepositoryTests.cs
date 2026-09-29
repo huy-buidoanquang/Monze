@@ -60,6 +60,8 @@ public sealed class PostgresScheduledMeetingRepositoryTests
                 claimUntil,
                 null,
                 "scheduled meeting test",
+                "{\"t\":\"scheduled meeting test\"}",
+                true,
                 CancellationToken.None));
 
             Assert.False(await repository.CommitScheduledMeetingAsync(
@@ -68,6 +70,8 @@ public sealed class PostgresScheduledMeetingRepositoryTests
                 claimUntil,
                 null,
                 "scheduled meeting duplicate",
+                "{\"t\":\"scheduled meeting duplicate\"}",
+                true,
                 CancellationToken.None));
 
             var firstState = await ReadStateAsync(firstScheduleId, firstRequesterId, voiceChannelId);
@@ -76,6 +80,7 @@ public sealed class PostgresScheduledMeetingRepositoryTests
             Assert.Equal(1, firstState.SessionCount);
             Assert.Equal(1, firstState.VoiceClaimCount);
             Assert.Equal(1, firstState.OutboxCount);
+            Assert.Equal(channelId, firstState.OutboxChannelId);
 
             secondScheduleId = await InsertRunningScheduleAsync(secondRequesterId, secondLease);
             var secondSchedule = firstSchedule with
@@ -91,6 +96,8 @@ public sealed class PostgresScheduledMeetingRepositoryTests
                 claimUntil,
                 null,
                 "scheduled meeting conflict",
+                "{\"t\":\"scheduled meeting conflict\"}",
+                true,
                 CancellationToken.None));
 
             var secondState = await ReadStateAsync(secondScheduleId, secondRequesterId, voiceChannelId);
@@ -99,6 +106,7 @@ public sealed class PostgresScheduledMeetingRepositoryTests
             Assert.Equal(0, secondState.SessionCount);
             Assert.Equal(1, secondState.VoiceClaimCount);
             Assert.Equal(0, secondState.OutboxCount);
+            Assert.Null(secondState.OutboxChannelId);
         }
         finally
         {
@@ -139,7 +147,7 @@ public sealed class PostgresScheduledMeetingRepositoryTests
             return (long)(await command.ExecuteScalarAsync() ?? 0L);
         }
 
-        async Task<(string ScheduleStatus, bool ScheduleLeaseIsNull, int SessionCount, int VoiceClaimCount, int OutboxCount)> ReadStateAsync(
+        async Task<(string ScheduleStatus, bool ScheduleLeaseIsNull, int SessionCount, int VoiceClaimCount, int OutboxCount, long? OutboxChannelId)> ReadStateAsync(
             long scheduleId,
             long requesterId,
             long voiceId)
@@ -154,6 +162,9 @@ public sealed class PostgresScheduledMeetingRepositoryTests
                        (SELECT count(*) FROM voice_claim c
                         WHERE c.clan_id = @clan AND c.voice_channel_id = @voice),
                        (SELECT count(*) FROM outbox_delivery o
+                        WHERE o.clan_id = @clan
+                          AND o.dedupe_key = 'meeting-schedule:' || @schedule::text || ':' || @next_ticks::text),
+                       (SELECT max(o.channel_id) FROM outbox_delivery o
                         WHERE o.clan_id = @clan
                           AND o.dedupe_key = 'meeting-schedule:' || @schedule::text || ':' || @next_ticks::text)
                 FROM meeting_schedule s
@@ -171,7 +182,8 @@ public sealed class PostgresScheduledMeetingRepositoryTests
                 reader.GetBoolean(1),
                 checked((int)reader.GetInt64(2)),
                 checked((int)reader.GetInt64(3)),
-                checked((int)reader.GetInt64(4)));
+                checked((int)reader.GetInt64(4)),
+                reader.IsDBNull(5) ? null : reader.GetInt64(5));
         }
 
         async Task ExecuteAsync(string sql, Action<NpgsqlCommand> configure)

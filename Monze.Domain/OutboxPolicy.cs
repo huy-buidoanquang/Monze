@@ -9,11 +9,6 @@ public static class OutboxPolicy
             return OutboxAction.AlreadyDelivered;
         }
 
-        if (kind == OutboxKind.CommandReply && failedAttempts < 1)
-        {
-            return OutboxAction.RetryOnce;
-        }
-
         if (failedAttempts == 0)
         {
             return OutboxAction.Send;

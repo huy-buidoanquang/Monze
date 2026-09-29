@@ -5,6 +5,5 @@ public enum RoleRuleKind
     OnJoin,
     SelfSelect,
     ExistingRole,
-    Tenure,
-    MinPoints
+    Tenure
 }

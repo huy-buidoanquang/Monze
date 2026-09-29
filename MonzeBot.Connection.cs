@@ -111,6 +111,14 @@ public sealed partial class MonzeBot
         for (var i = 0; i < list.Clandesc.Count; i++)
         {
             var desc = list.Clandesc[i];
+            if (desc.WelcomeChannelId > 0)
+            {
+                _welcomeChannelIds[desc.ClanId] = desc.WelcomeChannelId;
+            }
+            else
+            {
+                _welcomeChannelIds.TryRemove(desc.ClanId, out _);
+            }
             listed.Add(new ClanScanItem(desc.ClanId, desc.CreatorId));
             listedIds.Add(desc.ClanId);
         }
@@ -137,6 +145,7 @@ public sealed partial class MonzeBot
         _logger.LogInformation("Mezon socket connected; preparing clan rejoin. KnownClans={KnownClans}.", _knownClans.Count);
         _voiceOccupancy.Clear();
         _voiceChannelsByClan.Clear();
+        _welcomeChannelIds.Clear();
         if (_knownClans.Count == 0)
         {
             return;

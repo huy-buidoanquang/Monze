@@ -28,7 +28,9 @@ public sealed partial class PostgresOutboxRepository : IOutboxRepository
             FROM due
             WHERE item.id = due.id
             RETURNING item.id, item.channel_id, item.kind, item.body, item.attempts,
-                      item.external_message_id, item.lease_token, item.due_at;
+                      item.external_message_id, item.lease_token, item.due_at,
+                      item.mention_everyone, item.content_json,
+                      item.meeting_session_id, item.reply_to_message_id;
             """ : """
             WITH due AS (
               SELECT id FROM outbox_delivery
@@ -46,7 +48,9 @@ public sealed partial class PostgresOutboxRepository : IOutboxRepository
             FROM due
             WHERE item.id = due.id
             RETURNING item.id, item.channel_id, item.kind, item.body, item.attempts,
-                      item.external_message_id, item.lease_token, item.due_at;
+                      item.external_message_id, item.lease_token, item.due_at,
+                      item.mention_everyone, item.content_json,
+                      item.meeting_session_id, item.reply_to_message_id;
             """;
         await using var command = new NpgsqlCommand(sql, connection);
         if (clanId is not null)
@@ -64,7 +68,11 @@ public sealed partial class PostgresOutboxRepository : IOutboxRepository
                 reader.GetInt32(4),
                 reader.IsDBNull(5) ? null : reader.GetInt64(5),
                 reader.GetString(6),
-                reader.GetFieldValue<DateTimeOffset>(7)));
+                reader.GetFieldValue<DateTimeOffset>(7),
+                reader.GetBoolean(8),
+                reader.IsDBNull(9) ? null : reader.GetString(9),
+                reader.IsDBNull(10) ? null : reader.GetInt64(10),
+                reader.IsDBNull(11) ? null : reader.GetInt64(11)));
         }
 
         return rows;

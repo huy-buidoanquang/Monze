@@ -35,4 +35,16 @@ public sealed class MonzeWelcomeFormParserTests
         Assert.Equal("Đã lưu", draft.Title);
         Assert.Equal("#2563EB", draft.Color);
     }
+
+    [Fact]
+    public void Read_form_supports_the_nested_component_id_used_by_message_inputs()
+    {
+        const string extra = """{"data":{"monze_welcome_title-component":{"value":"Nested title"}}}""";
+
+        var draft = MonzeWelcomeFormParser.ReadEmbed(
+            extra,
+            new WelcomeSettings(false, null, 1));
+
+        Assert.Equal("Nested title", draft.Title);
+    }
 }

@@ -1,5 +1,7 @@
 # Monze capacity and rollout gate
 
+Historical measurements in this file may mention community commands from before migration `018`; they do not describe the retained command surface after the cleanup.
+
 ## Required stages
 
 1. One test clan.

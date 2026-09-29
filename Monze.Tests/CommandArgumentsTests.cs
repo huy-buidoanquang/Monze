@@ -26,7 +26,7 @@ public sealed class CommandArgumentsTests
     [Fact]
     public void Slicing_and_single_argument_join_are_allocation_free_after_warmup()
     {
-        var source = new[] { "points" };
+        var source = new[] { "role" };
         var arguments = new CommandArguments(source);
         _ = arguments.Slice(0)[0];
         _ = arguments.Slice(1).Join(' ');

@@ -9,7 +9,6 @@ using System.Threading.Channels;
 [ShortRunJob]
 public class MonzeHotPathBenchmarks
 {
-    private static readonly int[] WheelWeights = [5, 3, 1];
     private PartitionedIngressQueue<IngressEnvelope> _queue = null!;
     private ChannelReader<IngressEnvelope> _reader = null!;
     private IngressEnvelope _envelope;
@@ -22,7 +21,7 @@ public class MonzeHotPathBenchmarks
     {
         _queue = new PartitionedIngressQueue<IngressEnvelope>(16, 8192);
         _envelope = new IngressEnvelope(206, 1001, 9001, 1);
-        _commandArguments = new CommandArguments(new[] { "points" });
+        _commandArguments = new CommandArguments(new[] { "role" });
         _rateLimiter = new MonzeCommandRateLimiter(new MonzeRateLimitOptions(
             UserLimit: 1_000_000,
             UserWindow: TimeSpan.FromMinutes(1),
@@ -34,7 +33,7 @@ public class MonzeHotPathBenchmarks
             AdminWindow: TimeSpan.FromMinutes(1),
             MaxEntries: 16));
         _rateLimitNow = DateTimeOffset.UtcNow;
-        _rateLimiter.TryAcquire(206, 1001, MonzeCommandNames.Points, _rateLimitNow, out _);
+        _rateLimiter.TryAcquire(206, 1001, MonzeCommandNames.Role, _rateLimitNow, out _);
         _reader = _queue.GetReader(0);
         _queue.TryWrite(_envelope.ClanId, _envelope);
         _reader.TryRead(out _);
@@ -49,10 +48,6 @@ public class MonzeHotPathBenchmarks
     }
 
     [Benchmark]
-    public int WheelIndex()
-        => Wheel.PickIndex(WheelWeights, 4);
-
-    [Benchmark]
     public string CommandArgumentsSingleItem()
         => _commandArguments.Slice(0).Join(' ');
 
@@ -61,7 +56,7 @@ public class MonzeHotPathBenchmarks
         => _rateLimiter.TryAcquire(
             206,
             1001,
-            MonzeCommandNames.Points,
+            MonzeCommandNames.Role,
             _rateLimitNow,
             out _);
 }

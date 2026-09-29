@@ -39,10 +39,151 @@ public sealed class MonzeUiTests
         Assert.Equal("Hướng dẫn", memberEmbed.GetProperty("title").GetString());
         Assert.DoesNotContain("Kết quả", member.GetRawText(), StringComparison.Ordinal);
         Assert.DoesNotContain("*monze welcome on", member.GetRawText(), StringComparison.Ordinal);
-        Assert.Contains("*monze points", member.GetRawText(), StringComparison.Ordinal);
+        Assert.Contains("*role", member.GetRawText(), StringComparison.Ordinal);
+        Assert.Contains("*ai", member.GetRawText(), StringComparison.Ordinal);
+        Assert.DoesNotContain("*event", member.GetRawText(), StringComparison.Ordinal);
+        Assert.DoesNotContain("*points", member.GetRawText(), StringComparison.Ordinal);
 
-        var admin = Parse(MonzeMessageBuilder.HelpPage("commands", options, isAdmin: true).RawJson);
-        Assert.Contains("*monze welcome on|off", admin.GetRawText(), StringComparison.Ordinal);
+        var adminWithoutOwnership = Parse(MonzeMessageBuilder.HelpPage(
+            "commands",
+            options,
+            isAdmin: true,
+            canManageWelcome: false).RawJson);
+        Assert.DoesNotContain("*monze welcome on", adminWithoutOwnership.GetRawText(), StringComparison.Ordinal);
+
+        var admin = Parse(MonzeMessageBuilder.HelpPage("commands", options, isAdmin: true, canManageWelcome: true).RawJson);
+        Assert.Contains("*welcome", admin.GetRawText(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Help_uses_one_embed_field_per_command_suggestion()
+    {
+        var options = new MonzeCommandOptions("*", MonzeCommandNames.Monze);
+        var root = Parse(MonzeMessageBuilder.HelpPage("commands", options, isAdmin: true, canManageWelcome: true).RawJson);
+        var fields = root.GetProperty("embed")[0].GetProperty("fields");
+
+        Assert.InRange(fields.GetArrayLength(), 1, 25);
+        foreach (var field in fields.EnumerateArray())
+        {
+            Assert.DoesNotContain('\n', field.GetProperty("value").GetString() ?? string.Empty);
+        }
+
+        var meeting = Parse(MonzeMessageBuilder.HelpPage("meeting", options).RawJson);
+        foreach (var field in meeting.GetProperty("embed")[0].GetProperty("fields").EnumerateArray())
+        {
+            Assert.DoesNotContain('\n', field.GetProperty("value").GetString() ?? string.Empty);
+        }
+
+        Assert.All(root.GetProperty("embed")[0].GetProperty("fields").EnumerateArray(), field =>
+        {
+            var name = field.GetProperty("name").GetString() ?? string.Empty;
+            Assert.DoesNotContain(" · ", name, StringComparison.Ordinal);
+            Assert.StartsWith("*", name, StringComparison.Ordinal);
+        });
+
+        Assert.Equal("*welcome on|off", Parse(MonzeMessageBuilder.HelpPage(
+            "welcome",
+            options,
+            isAdmin: true,
+            canManageWelcome: true).RawJson)
+            .GetProperty("embed")[0]
+            .GetProperty("fields")[0]
+            .GetProperty("name")
+            .GetString());
+
+        Assert.Equal("*meeting", meeting.GetProperty("embed")[0].GetProperty("fields")[0].GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public void Help_navigation_keeps_module_buttons_and_close_on_every_page()
+    {
+        var options = new MonzeCommandOptions("*", MonzeCommandNames.Monze);
+        var root = MonzeMessageBuilder.HelpPage(
+            "commands",
+            options,
+            isAdmin: true,
+            canManageWelcome: true,
+            isOwner: true).RawJson;
+        var meeting = MonzeMessageBuilder.HelpPage(
+            "meeting",
+            options,
+            isAdmin: true,
+            canManageWelcome: true,
+            isOwner: true).RawJson;
+        var ai = MonzeMessageBuilder.HelpPage(
+            "ai",
+            options,
+            isAdmin: false,
+            canManageWelcome: false,
+            isOwner: false).RawJson;
+
+        foreach (var buttonId in new[]
+        {
+            MonzeButtonId.HelpMeeting,
+            MonzeButtonId.HelpSummary,
+            MonzeButtonId.HelpWelcome,
+            MonzeButtonId.HelpRole,
+            MonzeButtonId.HelpAi,
+            MonzeButtonId.HelpClose
+        })
+        {
+            Assert.Contains(buttonId, root, StringComparison.Ordinal);
+            Assert.Contains(buttonId, meeting, StringComparison.Ordinal);
+            Assert.Contains(buttonId, ai, StringComparison.Ordinal);
+        }
+
+        Assert.Contains(MonzeButtonId.HelpSetup, root, StringComparison.Ordinal);
+        Assert.Contains(MonzeButtonId.HelpSetup, meeting, StringComparison.Ordinal);
+        Assert.DoesNotContain(MonzeButtonId.HelpSetup, ai, StringComparison.Ordinal);
+        Assert.DoesNotContain("Chung", root, StringComparison.Ordinal);
+        Assert.DoesNotContain("Chung", meeting, StringComparison.Ordinal);
+        Assert.DoesNotContain("Chung", ai, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Structured_outcome_fields_render_as_separate_embed_fields()
+    {
+        var content = MonzeMessageBuilder.Card(new CommandOutcome
+        {
+            Title = "AI",
+            Text = string.Empty,
+            Fields =
+            [
+                new CommandField("Tóm tắt", "Nội dung đã tóm tắt."),
+                new CommandField("Lưu ý", "Có thể thiếu một phần lịch sử.")
+            ]
+        });
+
+        var fields = Parse(content.RawJson).GetProperty("embed")[0].GetProperty("fields");
+
+        Assert.Equal(2, fields.GetArrayLength());
+        Assert.Equal("Tóm tắt", fields[0].GetProperty("name").GetString());
+        Assert.Equal("Nội dung đã tóm tắt.", fields[0].GetProperty("value").GetString());
+        Assert.Equal("Lưu ý", fields[1].GetProperty("name").GetString());
+        Assert.Equal("Có thể thiếu một phần lịch sử.", fields[1].GetProperty("value").GetString());
+        Assert.DoesNotContain("Kết quả", content.RawJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Welcome_help_explains_owner_and_admin_access()
+    {
+        var options = new MonzeCommandOptions("*", MonzeCommandNames.Monze);
+
+        var memberHelp = MonzeHelpCatalog.ForModule(
+            MonzeCommandNames.Welcome,
+            options,
+            isAdmin: false,
+            canManageWelcome: false);
+        Assert.Contains("owner hoặc admin", string.Join(" ", memberHelp.Select(static entry => entry.Value)), StringComparison.Ordinal);
+
+        var adminHelp = MonzeHelpCatalog.ForModule(
+            MonzeCommandNames.Welcome,
+            options,
+            isAdmin: true,
+            canManageWelcome: true);
+        var adminText = string.Join("\n", adminHelp.Select(static entry => entry.Name + " " + entry.Value));
+        Assert.Contains("*welcome setup", adminText, StringComparison.Ordinal);
+        Assert.Contains("*welcome setup remove", adminText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -59,6 +200,7 @@ public sealed class MonzeUiTests
         Assert.Contains(MonzeButtonId.WelcomeStatus, raw, StringComparison.Ordinal);
         Assert.Contains(MonzeButtonId.WelcomePreview, raw, StringComparison.Ordinal);
         Assert.Contains(MonzeButtonId.WelcomeSave, raw, StringComparison.Ordinal);
+        Assert.Contains(MonzeButtonId.WelcomeCancel, raw, StringComparison.Ordinal);
         Assert.DoesNotContain("Kết quả", raw, StringComparison.Ordinal);
     }
 
@@ -77,6 +219,15 @@ public sealed class MonzeUiTests
             MonzeButtonId.WelcomeSaveFor(token),
             out var parsed));
         Assert.Equal(token, parsed);
+    }
+
+    [Fact]
+    public void Welcome_setup_explains_that_submit_saves_the_draft()
+    {
+        var raw = MonzeMessages.WelcomeSetupText();
+
+        Assert.Contains("Preview để xem trước, Submit để lưu.", raw, StringComparison.Ordinal);
+        Assert.DoesNotContain("apply", raw, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ReadColor(string raw)

@@ -1,5 +1,5 @@
-using System.Globalization;
 using System.Collections.Concurrent;
+using System.Globalization;
 using Monze.Application.Commands;
 using Monze.Domain;
 
@@ -7,107 +7,90 @@ namespace Monze.Application;
 
 public sealed partial class MonzeApp
 {
+    private const int DefaultTenureDays = 30;
     private readonly ConcurrentDictionary<long, SemaphoreSlim> _roleRuleGates = new();
 
-    private async Task<CommandOutcome> ConfigureRoleRuleAsync(
+    private async Task<CommandOutcome> RoleAsync(
         long clanId,
         long userId,
         CommandArguments rest,
         CancellationToken cancellationToken)
     {
+        if (rest.Length == 0)
+        {
+            return await HelpOutcomeAsync(clanId, userId, MonzeCommandNames.Role, cancellationToken);
+        }
+
         if (!await _authorization.IsAdminAsync(clanId, userId, cancellationToken))
         {
-            return Say(MonzeMessages.AdminOnly);
+            return Say(MonzeMessages.AdminOnly, title: MonzeMessages.TitleRole, tone: MonzeTone.Error);
         }
 
-        if (rest.Length < 3)
+        if (rest.Length == 1
+            && (rest[0].Equals(MonzeCommandActions.On, StringComparison.OrdinalIgnoreCase)
+                || rest[0].Equals(MonzeCommandActions.Off, StringComparison.OrdinalIgnoreCase)))
+        {
+            var enabled = rest[0].Equals(MonzeCommandActions.On, StringComparison.OrdinalIgnoreCase);
+            await _authorization.SetRoleAutomationEnabledAsync(clanId, enabled, cancellationToken);
+            return Say(
+                enabled ? MonzeMessages.RoleAutomationEnabled : MonzeMessages.RoleAutomationDisabled,
+                title: MonzeMessages.TitleRole,
+                tone: MonzeTone.Ok);
+        }
+
+        if (rest.Length < 2
+            || (!rest[0].Equals("join", StringComparison.OrdinalIgnoreCase)
+                && !rest[0].Equals(MonzeCommandActions.Tenure, StringComparison.OrdinalIgnoreCase)))
         {
             return await HelpOutcomeAsync(clanId, userId, MonzeCommandNames.Role, cancellationToken);
         }
 
-        var action = rest[1].Trim();
-        if (action.Equals(MonzeCommandActions.Remove, StringComparison.OrdinalIgnoreCase))
+        var kind = rest[0].Equals("join", StringComparison.OrdinalIgnoreCase)
+            ? RoleRuleKind.OnJoin
+            : RoleRuleKind.Tenure;
+        var remove = rest.Length >= 2
+            && rest[1].Equals(MonzeCommandActions.Remove, StringComparison.OrdinalIgnoreCase);
+        var selectorStart = remove ? 2 : 1;
+        if (rest.Length <= selectorStart)
         {
-            if (rest.Length < 4 || !RoleRules.TryParseKind(rest[2], out var removeKind))
-            {
-                return await HelpOutcomeAsync(clanId, userId, MonzeCommandNames.Role, cancellationToken);
-            }
+            return await HelpOutcomeAsync(clanId, userId, MonzeCommandNames.Role, cancellationToken);
+        }
 
-            var removeRole = await ResolveRoleAsync(clanId, rest.Join(' ', 3), cancellationToken);
-            if (!removeRole.Found || removeKind == RoleRuleKind.SelfSelect)
-            {
-                return Say(MonzeMessages.RoleRuleInvalid);
-            }
+        var role = await ResolveRoleAsync(
+            clanId,
+            rest.Join(' ', selectorStart),
+            cancellationToken);
+        if (!role.Found)
+        {
+            return Say(MonzeMessages.RoleNotFound, title: MonzeMessages.TitleRole, tone: MonzeTone.Warn);
+        }
 
+        if (remove)
+        {
             var removed = await _authorization.RemoveRoleRuleAsync(
                 clanId,
-                removeRole.RoleId,
-                removeKind,
+                role.RoleId,
+                kind,
                 cancellationToken);
-            return Say(removed ? $"Đã xóa rule {removeKind} cho role {removeRole.Label}." : "Không tìm thấy rule role.");
+            return Say(
+                removed ? $"Đã xóa rule {RoleRuleLabel(kind)} cho role {role.Label}." : MonzeMessages.RoleRuleNotFound,
+                title: MonzeMessages.TitleRole,
+                tone: removed ? MonzeTone.Ok : MonzeTone.Warn);
         }
 
-        if (!RoleRules.TryParseKind(action, out var kind) || kind == RoleRuleKind.SelfSelect)
-        {
-            return await HelpOutcomeAsync(clanId, userId, MonzeCommandNames.Role, cancellationToken);
-        }
-
-        var raw = rest.Join(' ', 2);
-        var parts = raw.Split('|', 2, StringSplitOptions.TrimEntries);
-        if (parts.Length == 0 || string.IsNullOrWhiteSpace(parts[0]))
-        {
-            return Say(MonzeMessages.RoleRuleInvalid);
-        }
-
-        var targetRole = await ResolveRoleAsync(clanId, parts[0], cancellationToken);
-        if (!targetRole.Found)
-        {
-            return Say(MonzeMessages.RoleNotFound);
-        }
-
-        string? condition = null;
-        if (kind == RoleRuleKind.ExistingRole)
-        {
-            if (parts.Length != 2)
-            {
-                return Say(MonzeMessages.RoleRuleInvalid);
-            }
-
-            var requiredRole = await ResolveRoleAsync(clanId, parts[1], cancellationToken);
-            if (!requiredRole.Found)
-            {
-                return Say(MonzeMessages.RoleNotFound);
-            }
-
-            condition = requiredRole.RoleId.ToString(CultureInfo.InvariantCulture);
-        }
-        else if (kind is RoleRuleKind.Tenure or RoleRuleKind.MinPoints)
-        {
-            if (parts.Length != 2
-                || !long.TryParse(
-                    parts[1],
-                    NumberStyles.Integer,
-                    CultureInfo.InvariantCulture,
-                    out var value)
-                || value <= 0)
-            {
-                return Say(MonzeMessages.RoleRuleInvalid);
-            }
-
-            condition = value.ToString(CultureInfo.InvariantCulture);
-        }
-        else if (parts.Length != 1)
-        {
-            return Say(MonzeMessages.RoleRuleInvalid);
-        }
-
+        var condition = kind == RoleRuleKind.Tenure
+            ? DefaultTenureDays.ToString(CultureInfo.InvariantCulture)
+            : null;
         await _authorization.SetRoleRuleAsync(
             clanId,
-            targetRole.RoleId,
+            role.RoleId,
             kind,
             condition,
             cancellationToken);
-        return Say($"Đã lưu rule {kind} cho role {targetRole.Label}.");
+        return Say(
+            $"Đã lưu rule {RoleRuleLabel(kind)} cho role {role.Label}.",
+            title: MonzeMessages.TitleRole,
+            tone: MonzeTone.Ok);
     }
 
     public async Task ApplyOnJoinRoleRulesAsync(
@@ -116,7 +99,7 @@ public sealed partial class MonzeApp
         CancellationToken cancellationToken)
     {
         var gateway = _roleGateway;
-        if (gateway is null)
+        if (gateway is null || !await _authorization.IsRoleAutomationEnabledAsync(clanId, cancellationToken))
         {
             return;
         }
@@ -134,20 +117,11 @@ public sealed partial class MonzeApp
             var members = await gateway.ListMembersAsync(clanId, cancellationToken);
             for (var i = 0; i < members.Count; i++)
             {
-                if (members[i].UserId != userId)
+                if (members[i].UserId == userId)
                 {
-                    continue;
+                    await ApplyRulesToMemberAsync(clanId, members[i], rules, true, gateway, cancellationToken);
+                    return;
                 }
-
-                await ApplyRulesToMemberAsync(
-                    clanId,
-                    members[i],
-                    rules,
-                    pointsByMinimum: null,
-                    onJoinOnly: true,
-                    gateway,
-                    cancellationToken);
-                return;
             }
         }
         finally
@@ -185,11 +159,7 @@ public sealed partial class MonzeApp
         foreach (var pair in byClan)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await ApplyAutomaticRoleRulesForClanAsync(
-                pair.Key,
-                pair.Value,
-                gateway,
-                cancellationToken);
+            await ApplyAutomaticRoleRulesForClanAsync(pair.Key, pair.Value, gateway, cancellationToken);
         }
     }
 
@@ -199,38 +169,19 @@ public sealed partial class MonzeApp
         IMezonRoleGateway gateway,
         CancellationToken cancellationToken)
     {
+        if (!await _authorization.IsRoleAutomationEnabledAsync(clanId, cancellationToken))
+        {
+            return;
+        }
+
         var gate = _roleRuleGates.GetOrAdd(clanId, static _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(cancellationToken);
         try
         {
             var members = await gateway.ListMembersAsync(clanId, cancellationToken);
-            var pointsByMinimum = new Dictionary<long, IReadOnlySet<long>>();
-            for (var i = 0; i < rules.Count; i++)
-            {
-                if (rules[i].Kind != RoleRuleKind.MinPoints
-                    || !TryReadPositiveLong(rules[i].ConditionValue, out var minimum)
-                    || pointsByMinimum.ContainsKey(minimum))
-                {
-                    continue;
-                }
-
-                var users = await _community.UsersWithMinimumPointsAsync(
-                    clanId,
-                    minimum,
-                    cancellationToken);
-                pointsByMinimum[minimum] = users.ToHashSet();
-            }
-
             for (var i = 0; i < members.Count; i++)
             {
-                await ApplyRulesToMemberAsync(
-                    clanId,
-                    members[i],
-                    rules,
-                    pointsByMinimum,
-                    onJoinOnly: false,
-                    gateway,
-                    cancellationToken);
+                await ApplyRulesToMemberAsync(clanId, members[i], rules, false, gateway, cancellationToken);
             }
         }
         finally
@@ -243,7 +194,6 @@ public sealed partial class MonzeApp
         long clanId,
         MemberRoleSnapshot member,
         IReadOnlyList<AutoRoleRule> rules,
-        IReadOnlyDictionary<long, IReadOnlySet<long>>? pointsByMinimum,
         bool onJoinOnly,
         IMezonRoleGateway gateway,
         CancellationToken cancellationToken)
@@ -257,20 +207,16 @@ public sealed partial class MonzeApp
         for (var i = 0; i < rules.Count; i++)
         {
             var rule = rules[i];
-            if (rule.Kind == RoleRuleKind.SelfSelect
-                || (onJoinOnly && rule.Kind is not (RoleRuleKind.OnJoin or RoleRuleKind.ExistingRole))
+            if ((onJoinOnly && rule.Kind != RoleRuleKind.OnJoin)
+                || rule.Kind is not (RoleRuleKind.OnJoin or RoleRuleKind.Tenure)
                 || member.RoleIds.Contains(rule.RoleId)
                 || (assignedRoleIds is not null && assignedRoleIds.Contains(rule.RoleId))
-                || !MatchesAutomaticRule(rule, member, pointsByMinimum))
+                || !MatchesAutomaticRule(rule, member))
             {
                 continue;
             }
 
-            var result = await gateway.AddUserToRoleAsync(
-                clanId,
-                rule.RoleId,
-                member.UserId,
-                cancellationToken);
+            var result = await gateway.AddUserToRoleAsync(clanId, rule.RoleId, member.UserId, cancellationToken);
             if (!result.Succeeded)
             {
                 continue;
@@ -278,53 +224,31 @@ public sealed partial class MonzeApp
 
             assignedRoleIds ??= new HashSet<long>();
             assignedRoleIds.Add(rule.RoleId);
-            await _authorization.RecordRoleGrantAsync(
-                clanId,
-                rule.RoleId,
-                member.UserId,
-                cancellationToken);
+            await _authorization.RecordRoleGrantAsync(clanId, rule.RoleId, member.UserId, cancellationToken);
         }
     }
 
-    private static bool MatchesAutomaticRule(
-        AutoRoleRule rule,
-        MemberRoleSnapshot member,
-        IReadOnlyDictionary<long, IReadOnlySet<long>>? pointsByMinimum)
-    {
-        return rule.Kind switch
+    private static bool MatchesAutomaticRule(AutoRoleRule rule, MemberRoleSnapshot member)
+        => rule.Kind switch
         {
             RoleRuleKind.OnJoin => true,
-            RoleRuleKind.ExistingRole => TryReadPositiveLong(rule.ConditionValue, out var requiredRoleId)
-                && RoleRules.MatchesExistingRole(member.RoleIds, requiredRoleId),
             RoleRuleKind.Tenure => member.JoinedAt is { } joinedAt
                 && TryReadPositiveLong(rule.ConditionValue, out var days)
                 && RoleRules.MatchesTenure(joinedAt, DateTimeOffset.UtcNow, TimeSpan.FromDays(days)),
-            RoleRuleKind.MinPoints => TryReadPositiveLong(rule.ConditionValue, out var minimum)
-                && pointsByMinimum is not null
-                && pointsByMinimum.TryGetValue(minimum, out var users)
-                && users.Contains(member.UserId),
             _ => false
         };
-    }
 
     private async Task<RoleResolutionResult> ResolveRoleAsync(
         long clanId,
         string selector,
         CancellationToken cancellationToken)
-    {
-        if (_roleGateway is null)
-        {
-            return new RoleResolutionResult(false, 0, string.Empty);
-        }
+        => _roleGateway is null
+            ? new RoleResolutionResult(false, 0, string.Empty)
+            : await _roleGateway.ResolveRoleAsync(clanId, selector, cancellationToken);
 
-        return await _roleGateway.ResolveRoleAsync(clanId, selector, cancellationToken);
-    }
+    private static string RoleRuleLabel(RoleRuleKind kind)
+        => kind == RoleRuleKind.Tenure ? "tenure" : "join";
 
     private static bool TryReadPositiveLong(string? value, out long result)
-        => long.TryParse(
-            value,
-            NumberStyles.Integer,
-            CultureInfo.InvariantCulture,
-            out result)
-            && result > 0;
+        => long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out result) && result > 0;
 }

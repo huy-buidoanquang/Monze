@@ -9,7 +9,7 @@ namespace Monze.Tests;
 public sealed class PostgresOutboxRepositoryTests
 {
     [Fact]
-    public async Task Outbox_claim_completion_reclaim_and_uncertain_resend_are_lease_scoped()
+    public async Task Outbox_claim_completion_reclaim_and_uncertain_are_lease_scoped()
     {
         if (!string.Equals(
                 Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
@@ -31,13 +31,7 @@ public sealed class PostgresOutboxRepositoryTests
         var repository = new PostgresOutboxRepository(dataSource);
         try
         {
-            await repository.EnqueueAsync(
-                clanId,
-                channelId,
-                OutboxKind.CommandReply,
-                firstKey,
-                "outbox integration first",
-                CancellationToken.None);
+            await InsertAsync(firstKey, OutboxKind.Announcement, "outbox integration first");
 
             var firstId = await ReadIdAsync(firstKey);
             var claims = await Task.WhenAll(
@@ -107,13 +101,7 @@ public sealed class PostgresOutboxRepositoryTests
             Assert.Equal(991234567890L, afterSuccessfulCompletion.ExternalMessageId);
             Assert.Null(afterSuccessfulCompletion.LastError);
 
-            await repository.EnqueueAsync(
-                clanId,
-                channelId,
-                OutboxKind.Announcement,
-                uncertainKey,
-                "outbox integration uncertain",
-                CancellationToken.None);
+            await InsertAsync(uncertainKey, OutboxKind.MeetingSummary, "outbox integration uncertain");
             var uncertainId = await ReadIdAsync(uncertainKey);
             var uncertainClaim = Assert.Single(
                 await repository.ClaimDueOutboxAsync(CancellationToken.None, clanId),
@@ -127,26 +115,9 @@ public sealed class PostgresOutboxRepositoryTests
                 CancellationToken.None,
                 "delivery-uncertain");
 
-            var uncertainRows = await repository.ListUncertainAsync(clanId, CancellationToken.None);
-            Assert.Contains(uncertainRows, row => row.StartsWith($"{uncertainId} ", StringComparison.Ordinal));
-
-            Assert.False(await repository.ResendAsync(clanId + 1, uncertainId, CancellationToken.None));
-            Assert.True(await repository.ResendAsync(clanId, uncertainId, CancellationToken.None));
-
-            var resent = Assert.Single(
-                await repository.ClaimDueOutboxAsync(CancellationToken.None, clanId),
-                item => item.Id == uncertainId);
-            await repository.CompleteOutboxAsync(
-                uncertainId,
-                resent.LeaseToken,
-                991234567891L,
-                failed: false,
-                CancellationToken.None);
-
-            var afterResend = await ReadStateAsync(uncertainId);
-            Assert.Equal("sent", afterResend.Status);
-            Assert.Equal(991234567891L, afterResend.ExternalMessageId);
-            Assert.Equal(1, afterResend.Attempts);
+            var afterUncertain = await ReadStateAsync(uncertainId);
+            Assert.Equal("uncertain", afterUncertain.Status);
+            Assert.Equal("delivery-uncertain", afterUncertain.LastError);
         }
         finally
         {
@@ -167,6 +138,21 @@ public sealed class PostgresOutboxRepositoryTests
                 connection);
             command.Parameters.AddWithValue("key", dedupeKey);
             return (long)(await command.ExecuteScalarAsync() ?? throw new InvalidOperationException("Outbox row was not inserted."));
+        }
+
+        async Task InsertAsync(string dedupeKey, OutboxKind kind, string body)
+        {
+            await using var connection = await dataSource.OpenConnectionAsync();
+            await using var command = new NpgsqlCommand("""
+                INSERT INTO outbox_delivery(clan_id, channel_id, kind, dedupe_key, body)
+                VALUES (@clan, @channel, @kind, @key, @body);
+                """, connection);
+            command.Parameters.AddWithValue("clan", clanId);
+            command.Parameters.AddWithValue("channel", channelId);
+            command.Parameters.AddWithValue("kind", kind.ToString());
+            command.Parameters.AddWithValue("key", dedupeKey);
+            command.Parameters.AddWithValue("body", body);
+            await command.ExecuteNonQueryAsync();
         }
 
         async Task<(string Status, int Attempts, DateTimeOffset DueAt, long? ExternalMessageId, string? LeaseToken, string? LastError)> ReadStateAsync(long id)

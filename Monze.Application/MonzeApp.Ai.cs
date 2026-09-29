@@ -9,17 +9,44 @@ public sealed partial class MonzeApp
         long clanId,
         long channelId,
         long userId,
-        string module,
         CommandArguments rest,
+        AiRequestContext? request,
         CancellationToken cancellationToken)
     {
+        if (rest.Length == 0 || rest[0].Equals(MonzeCommandNames.Help, StringComparison.OrdinalIgnoreCase))
+        {
+            return await HelpOutcomeAsync(clanId, userId, MonzeCommandNames.Ai, cancellationToken);
+        }
+
+        var module = MonzeCommandNames.Normalize(rest[0]);
+        if (module is not (MonzeCommandNames.AiSummary
+            or MonzeCommandNames.Translate
+            or MonzeCommandNames.Composer
+            or MonzeCommandNames.Simplify))
+        {
+            return await HelpOutcomeAsync(clanId, userId, MonzeCommandNames.Ai, cancellationToken);
+        }
+
+        if (module == MonzeCommandNames.AiSummary
+            && request?.ReplyToMessageId is > 0
+            && !request.ReplyWithinOneHour)
+        {
+            return Say(MonzeMessages.AiHistoryWindow, tone: MonzeTone.Warn);
+        }
+
         var ai = _ai;
         if (ai is null)
         {
             return Say(MonzeMessages.AiNotConfigured);
         }
 
-        var input = rest.Join(' ');
+        var input = rest.Join(' ', 1);
+        if (module == MonzeCommandNames.AiSummary && !string.IsNullOrWhiteSpace(request?.HistoryText))
+        {
+            input = string.IsNullOrWhiteSpace(input)
+                ? request!.HistoryText!
+                : request.HistoryText + "\n" + input;
+        }
         if (string.IsNullOrWhiteSpace(input))
         {
             return Say(MonzeMessages.AiInputEmpty);
@@ -71,6 +98,20 @@ public sealed partial class MonzeApp
         var generated = await ai.CompleteAsync(instruction, input, cancellationToken);
         var body = generated ?? MonzeMessages.AiProviderEmpty;
         var note = MessageGap.CoverageNote(gap && module == "sum");
-        return new CommandOutcome { Text = string.IsNullOrEmpty(note) ? body : body + "\n" + note, HasGap = gap };
+        var fields = new List<CommandField>(string.IsNullOrEmpty(note) ? 1 : 2)
+        {
+            new(string.Empty, body)
+        };
+        if (!string.IsNullOrEmpty(note))
+        {
+            fields.Add(new("Lưu ý", note));
+        }
+
+        return new CommandOutcome
+        {
+            Text = string.Empty,
+            Fields = fields,
+            HasGap = gap
+        };
     }
 }

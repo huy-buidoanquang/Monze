@@ -66,9 +66,15 @@ public static class MonzeWelcomeFormParser
                 return Scalar(direct);
             }
 
+            if (element.TryGetProperty(id + "-component", out var nestedDirect))
+            {
+                return Scalar(nestedDirect);
+            }
+
             if (element.TryGetProperty("id", out var componentId)
                 && componentId.ValueKind == JsonValueKind.String
-                && string.Equals(componentId.GetString(), id, StringComparison.Ordinal)
+                && (string.Equals(componentId.GetString(), id, StringComparison.Ordinal)
+                    || string.Equals(componentId.GetString(), id + "-component", StringComparison.Ordinal))
                 && element.TryGetProperty("value", out var value))
             {
                 return Scalar(value);

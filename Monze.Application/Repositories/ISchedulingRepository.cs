@@ -8,10 +8,27 @@ public interface ISchedulingRepository
         long clanId,
         long channelId,
         long userId,
+        string name,
         MeetingScheduleKind kind,
         string whenText,
         string timeZoneId,
         DateTimeOffset nextRunAt,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<MeetingScheduleSummary>> ListMeetingSchedulesAsync(
+        long clanId,
+        long channelId,
+        long userId,
+        bool includeAll,
+        int limit,
+        CancellationToken cancellationToken);
+
+    Task<bool> CancelMeetingScheduleAsync(
+        long clanId,
+        long channelId,
+        long userId,
+        bool includeAll,
+        long scheduleId,
         CancellationToken cancellationToken);
 
     Task<IReadOnlyList<DueMeetingSchedule>> ClaimDueMeetingSchedulesAsync(CancellationToken cancellationToken);

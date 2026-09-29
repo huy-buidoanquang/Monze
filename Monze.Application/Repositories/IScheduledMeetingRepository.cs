@@ -8,5 +8,7 @@ public interface IScheduledMeetingRepository
         DateTimeOffset claimUntil,
         DateTimeOffset? nextRunAt,
         string announcementBody,
+        string contentJson,
+        bool mentionEveryone,
         CancellationToken cancellationToken);
 }

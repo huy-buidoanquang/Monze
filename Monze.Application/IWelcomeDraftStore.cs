@@ -7,7 +7,8 @@ public interface IWelcomeDraftStore
         long channelId,
         bool enabled,
         WelcomeEmbedSettings draft,
-        DateTimeOffset now);
+        DateTimeOffset now,
+        string? text = null);
 
     bool TryGet(
         string token,

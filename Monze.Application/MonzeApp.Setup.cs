@@ -12,6 +12,11 @@ public sealed partial class MonzeApp
         long? mentionedUserId,
         CancellationToken cancellationToken)
     {
+        if (!await _authorization.IsOwnerAsync(clanId, userId, cancellationToken))
+        {
+            return Say(MonzeMessages.OwnerOnly, tone: MonzeTone.Error);
+        }
+
         if (rest.Length >= 2 && rest[0].Equals(MonzeCommandActions.Admin, StringComparison.OrdinalIgnoreCase))
         {
             if (!rest[1].Equals(MonzeCommandActions.Add, StringComparison.OrdinalIgnoreCase)
@@ -20,17 +25,12 @@ public sealed partial class MonzeApp
                 return await SetupHelpAsync(clanId, userId, cancellationToken);
             }
 
-            if (!await _authorization.IsOwnerAsync(clanId, userId, cancellationToken))
-            {
-                return Say(MonzeMessages.OwnerOnly);
-            }
-
             long parsedUserId = 0;
             var targetUserId = mentionedUserId;
             if (targetUserId is null
                 && (rest.Length < 3 || !long.TryParse(rest[2], out parsedUserId) || parsedUserId <= 0))
             {
-                return Say(MonzeMessages.SetupAdminHelp(_commandOptions));
+                return await HelpOutcomeAsync(clanId, userId, MonzeCommandNames.Setup, cancellationToken);
             }
 
             targetUserId ??= parsedUserId;
@@ -50,11 +50,6 @@ public sealed partial class MonzeApp
                 : enabled ? MonzeMessages.DelegateAlreadyExists : MonzeMessages.DelegateNotFound);
         }
 
-        if (rest.Length > 0 && rest[0].Equals(MonzeCommandNames.Welcome, StringComparison.OrdinalIgnoreCase))
-        {
-            return await WelcomeAsync(clanId, channelId, userId, rest.Slice(1), cancellationToken);
-        }
-
         return await SetupHelpAsync(clanId, userId, cancellationToken);
     }
 
@@ -65,10 +60,42 @@ public sealed partial class MonzeApp
         CommandArguments args,
         CancellationToken cancellationToken)
     {
-        if (args.Length > 0
-            && args[0].Equals(MonzeCommandActions.Setting, StringComparison.OrdinalIgnoreCase))
+        if (args.Length > 0 && args[0].Equals(MonzeCommandActions.Setup, StringComparison.OrdinalIgnoreCase))
         {
+            if (args.Length > 1
+                && args[1].Equals(MonzeCommandActions.Remove, StringComparison.OrdinalIgnoreCase))
+            {
+                return await RemoveWelcomeEmbedAsync(clanId, userId, cancellationToken);
+            }
+
             return await GetWelcomeSettingsAsync(clanId, userId, cancellationToken);
+        }
+
+        if (args.Length > 0
+            && args[0].Equals(MonzeCommandActions.Preview, StringComparison.OrdinalIgnoreCase))
+        {
+            return await GetWelcomePreviewAsync(clanId, userId, cancellationToken);
+        }
+
+        if (args.Length > 0
+            && args[0].Equals(MonzeCommandActions.Message, StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length == 2
+                && args[1].Equals(MonzeCommandActions.Remove, StringComparison.OrdinalIgnoreCase))
+            {
+                return await RemoveWelcomeMessageAsync(clanId, userId, cancellationToken);
+            }
+
+            if (args.Length < 2)
+            {
+                return await HelpOutcomeAsync(clanId, userId, MonzeCommandNames.Welcome, cancellationToken);
+            }
+
+            return await SetWelcomeMessageAsync(
+                clanId,
+                userId,
+                args.Join(' ', 1),
+                cancellationToken);
         }
 
         if (args.Length > 0
@@ -79,7 +106,7 @@ public sealed partial class MonzeApp
                 return await HelpOutcomeAsync(clanId, userId, MonzeCommandNames.Welcome, cancellationToken);
             }
 
-            return await ApplyWelcomeDraftAsync(
+            return await SaveWelcomeDraftAsync(
                 clanId,
                 channelId,
                 userId,
@@ -108,14 +135,18 @@ public sealed partial class MonzeApp
         long userId,
         CancellationToken cancellationToken)
     {
-        var isAdmin = await _authorization.IsAdminAsync(clanId, userId, cancellationToken);
+        var isOwner = await _authorization.IsOwnerAsync(clanId, userId, cancellationToken);
         return new CommandOutcome
         {
             Title = MonzeMessages.TitleHelp,
-            Text = MonzeMessages.SetupHelp(_commandOptions, isAdmin),
+            // Setup help is rendered from HelpTopic by MonzeMessageBuilder.
+            // Avoid constructing the retired newline-based help text.
+            Text = string.Empty,
             HelpTopic = MonzeCommandNames.Setup,
-            HelpForAdmin = isAdmin,
-            ShowWelcomeHelp = isAdmin
+            HelpForAdmin = isOwner,
+            HelpForOwner = isOwner,
+            CanManageWelcome = isOwner,
+            ShowWelcomeHelp = isOwner
         };
     }
 
@@ -126,7 +157,7 @@ public sealed partial class MonzeApp
     {
         if (!await _authorization.IsAdminAsync(clanId, userId, cancellationToken))
         {
-            return Say(MonzeMessages.AdminOnly, tone: MonzeTone.Error);
+            return Say(MonzeMessages.WelcomeAdminOnly, tone: MonzeTone.Error);
         }
 
         var settings = await _authorization.GetWelcomeAsync(clanId, cancellationToken)
@@ -134,7 +165,7 @@ public sealed partial class MonzeApp
         return new CommandOutcome
         {
             Title = MonzeMessages.TitleWelcomeSetup,
-            Text = MonzeMessages.WelcomeSetupText(_commandOptions),
+            Text = MonzeMessages.WelcomeSetupText(),
             ShowWelcomeSettings = true,
             WelcomeSettings = settings
         };
@@ -145,7 +176,8 @@ public sealed partial class MonzeApp
         long channelId,
         bool enabled,
         WelcomeEmbedSettings draft,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? messageText = null)
     {
         var normalized = NormalizeWelcomeEmbed(draft);
         var ticket = _welcomeDrafts.Create(
@@ -153,16 +185,42 @@ public sealed partial class MonzeApp
             channelId,
             enabled,
             normalized,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            messageText);
 
         return Task.FromResult(new CommandOutcome
         {
             Title = MonzeMessages.WelcomePreview,
-            Text = MonzeMessages.WelcomeDraftReady(_commandOptions, ticket.Token),
+            Text = MonzeMessages.WelcomeDraftReady(),
             ShowWelcomePreview = true,
             WelcomeDraft = normalized,
-            WelcomeDraftToken = ticket.Token
+            WelcomeDraftToken = ticket.Token,
+            WelcomeMessageText = messageText
         });
+    }
+
+    public async Task<CommandOutcome> GetWelcomePreviewAsync(
+        long clanId,
+        long userId,
+        CancellationToken cancellationToken)
+    {
+        if (!await _authorization.IsAdminAsync(clanId, userId, cancellationToken))
+        {
+            return Say(MonzeMessages.WelcomeAdminOnly, tone: MonzeTone.Error);
+        }
+
+        var settings = await _authorization.GetWelcomeAsync(clanId, cancellationToken)
+            ?? new WelcomeSettings(false, null, 0);
+        return new CommandOutcome
+        {
+            Title = MonzeMessages.WelcomePreview,
+            Text = settings.Text ?? MonzeMessages.DefaultWelcomeText,
+            ShowWelcomePreview = true,
+            WelcomeDraft = settings.Embed ?? new WelcomeEmbedSettings(
+                Title: "Chào mừng",
+                Description: settings.Text ?? MonzeMessages.DefaultWelcomeText),
+            WelcomeMessageText = settings.Text
+        };
     }
 
     public Task<CommandOutcome> GetWelcomeDraftPreviewAsync(
@@ -184,29 +242,15 @@ public sealed partial class MonzeApp
         return Task.FromResult(new CommandOutcome
         {
             Title = MonzeMessages.WelcomePreview,
-            Text = MonzeMessages.WelcomeDraftReady(_commandOptions, ticket.Token),
+            Text = MonzeMessages.WelcomeDraftReady(),
             ShowWelcomePreview = true,
             WelcomeDraft = ticket.Draft,
-            WelcomeDraftToken = ticket.Token
+            WelcomeDraftToken = ticket.Token,
+            WelcomeMessageText = ticket.Text
         });
     }
 
-    public async Task<CommandOutcome> GetWelcomeSettingsForInteractionAsync(
-        long clanId,
-        CancellationToken cancellationToken)
-    {
-        var settings = await _authorization.GetWelcomeAsync(clanId, cancellationToken)
-            ?? new WelcomeSettings(false, null, 0);
-        return new CommandOutcome
-        {
-            Title = MonzeMessages.TitleWelcomeSetup,
-            Text = MonzeMessages.WelcomeSetupText(_commandOptions),
-            ShowWelcomeSettings = true,
-            WelcomeSettings = settings
-        };
-    }
-
-    private async Task<CommandOutcome> ApplyWelcomeDraftAsync(
+    public async Task<CommandOutcome> SaveWelcomeDraftAsync(
         long clanId,
         long channelId,
         long userId,
@@ -215,7 +259,7 @@ public sealed partial class MonzeApp
     {
         if (!await _authorization.IsAdminAsync(clanId, userId, cancellationToken))
         {
-            return Say(MonzeMessages.AdminOnly, tone: MonzeTone.Error);
+            return Say(MonzeMessages.WelcomeAdminOnly, tone: MonzeTone.Error);
         }
 
         if (!_welcomeDrafts.TryClaim(
@@ -235,7 +279,8 @@ public sealed partial class MonzeApp
                 userId,
                 ticket.Enabled,
                 ticket.Draft,
-                cancellationToken);
+                cancellationToken,
+                ticket.Text);
             if (outcome.Tone == MonzeTone.Error)
             {
                 _welcomeDrafts.Release(ticket);
@@ -257,18 +302,19 @@ public sealed partial class MonzeApp
         long userId,
         bool enabled,
         WelcomeEmbedSettings draft,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? welcomeText = null)
     {
         if (!await _authorization.IsAdminAsync(clanId, userId, cancellationToken))
         {
-            return Say(MonzeMessages.AdminOnly, tone: MonzeTone.Error);
+            return Say(MonzeMessages.WelcomeAdminOnly, tone: MonzeTone.Error);
         }
 
         var normalized = NormalizeWelcomeEmbed(draft);
         var version = await _authorization.SetWelcomeConfigurationAsync(
             clanId,
             enabled,
-            null,
+            welcomeText,
             normalized,
             cancellationToken);
         try
@@ -292,6 +338,104 @@ public sealed partial class MonzeApp
             Tone = MonzeTone.Ok,
             ShowWelcomeHelp = true
         };
+    }
+
+    public async Task<CommandOutcome> SetWelcomeMessageAsync(
+        long clanId,
+        long userId,
+        string text,
+        CancellationToken cancellationToken)
+    {
+        if (!await _authorization.IsAdminAsync(clanId, userId, cancellationToken))
+        {
+            return Say(MonzeMessages.WelcomeAdminOnly, tone: MonzeTone.Error);
+        }
+
+        var normalized = Limit(text, 4_000);
+        if (normalized is null)
+        {
+            return Say(MonzeMessages.WelcomeMessageRequired, tone: MonzeTone.Warn);
+        }
+
+        var version = await _authorization.SetWelcomeMessageAsync(
+            clanId,
+            normalized,
+            cancellationToken);
+        await InvalidateWelcomeAsync(clanId, version, cancellationToken);
+        return new CommandOutcome
+        {
+            Title = MonzeMessages.TitleWelcome,
+            Text = MonzeMessages.WelcomeMessageSaved,
+            Tone = MonzeTone.Ok,
+            ShowWelcomeHelp = true
+        };
+    }
+
+    public async Task<CommandOutcome> RemoveWelcomeEmbedAsync(
+        long clanId,
+        long userId,
+        CancellationToken cancellationToken)
+    {
+        if (!await _authorization.IsAdminAsync(clanId, userId, cancellationToken))
+        {
+            return Say(MonzeMessages.WelcomeAdminOnly, tone: MonzeTone.Error);
+        }
+
+        var version = await _authorization.RemoveWelcomeEmbedAsync(clanId, cancellationToken);
+        await InvalidateWelcomeAsync(clanId, version, cancellationToken);
+        return new CommandOutcome
+        {
+            Title = MonzeMessages.TitleWelcome,
+            Text = MonzeMessages.WelcomeEmbedRemoved,
+            Tone = MonzeTone.Ok,
+            ShowWelcomeHelp = true
+        };
+    }
+
+    public async Task<CommandOutcome> RemoveWelcomeMessageAsync(
+        long clanId,
+        long userId,
+        CancellationToken cancellationToken)
+    {
+        if (!await _authorization.IsAdminAsync(clanId, userId, cancellationToken))
+        {
+            return Say(MonzeMessages.WelcomeAdminOnly, tone: MonzeTone.Error);
+        }
+
+        var version = await _authorization.RemoveWelcomeMessageAsync(clanId, cancellationToken);
+        await InvalidateWelcomeAsync(clanId, version, cancellationToken);
+        return new CommandOutcome
+        {
+            Title = MonzeMessages.TitleWelcome,
+            Text = MonzeMessages.WelcomeMessageRemoved,
+            Tone = MonzeTone.Ok,
+            ShowWelcomeHelp = true
+        };
+    }
+
+    private async Task InvalidateWelcomeAsync(
+        long clanId,
+        long version,
+        CancellationToken cancellationToken)
+    {
+        if (version == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await _readModelCache.InvalidateAsync(
+                clanId,
+                "welcome",
+                "settings",
+                version,
+                cancellationToken);
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            // PostgreSQL remains authoritative when the read-model cache is unavailable.
+        }
     }
 
     private static WelcomeEmbedSettings NormalizeWelcomeEmbed(WelcomeEmbedSettings draft)

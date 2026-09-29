@@ -24,6 +24,27 @@ public sealed class PostgresMeetingRepository : IMeetingRepository
         return (long)(await command.ExecuteScalarAsync(cancellationToken) ?? 0L);
     }
 
+    public async Task<IReadOnlySet<long>> ActiveVoiceClaimsAsync(
+        long clanId,
+        CancellationToken cancellationToken)
+    {
+        var claims = new HashSet<long>();
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            SELECT voice_channel_id
+            FROM voice_claim
+            WHERE clan_id = @clan AND expires_at > now();
+            """, connection);
+        command.Parameters.AddWithValue("clan", clanId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            claims.Add(reader.GetInt64(0));
+        }
+
+        return claims;
+    }
+
 
     public async Task<bool> SuggestMeetingAsync(long sessionId, long voiceChannelId, DateTimeOffset claimUntil, CancellationToken cancellationToken)
     {
@@ -124,6 +145,104 @@ public sealed class PostgresMeetingRepository : IMeetingRepository
         return updated;
     }
 
+    public async Task<MeetingSessionBinding?> BindAgentSessionAsync(
+        long clanId,
+        long voiceChannelId,
+        string roomId,
+        long requesterId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        MeetingSessionBinding? binding = null;
+
+        await using (var existing = new NpgsqlCommand("""
+            SELECT id, text_channel_id, voice_channel_id, direct_agent,
+                   notification_message_id, notification_channel_id
+            FROM meeting_session
+            WHERE clan_id = @clan
+              AND voice_channel_id = @voice
+              AND status IN ('requested', 'suggested')
+              AND room_id IS NULL
+            ORDER BY id DESC
+            LIMIT 1
+            FOR UPDATE;
+            """, connection, transaction))
+        {
+            existing.Parameters.AddWithValue("clan", clanId);
+            existing.Parameters.AddWithValue("voice", voiceChannelId);
+            await using var reader = await existing.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                var sessionId = reader.GetInt64(0);
+                var textChannelId = reader.GetInt64(1);
+                var voiceId = reader.GetInt64(2);
+                var direct = reader.GetBoolean(3);
+                long? messageId = reader.IsDBNull(4) ? null : reader.GetInt64(4);
+                long? notificationChannelId = reader.IsDBNull(5) ? null : reader.GetInt64(5);
+                binding = new MeetingSessionBinding(
+                    sessionId,
+                    clanId,
+                    textChannelId,
+                    voiceId,
+                    direct,
+                    messageId,
+                    notificationChannelId);
+            }
+        }
+
+        if (binding is null)
+        {
+            await using var create = new NpgsqlCommand("""
+                INSERT INTO meeting_session(
+                    clan_id, text_channel_id, voice_channel_id, requester_id,
+                    status, room_id, direct_agent, notification_channel_id, started_at)
+                VALUES (@clan, @voice, @voice, @requester, 'live', @room, TRUE, @voice, now())
+                RETURNING id;
+                """, connection, transaction);
+            create.Parameters.AddWithValue("clan", clanId);
+            create.Parameters.AddWithValue("voice", voiceChannelId);
+            create.Parameters.AddWithValue("requester", requesterId);
+            create.Parameters.AddWithValue("room", roomId);
+            var sessionId = (long)(await create.ExecuteScalarAsync(cancellationToken)
+                ?? throw new InvalidOperationException("Agent meeting session was not created."));
+            binding = new MeetingSessionBinding(
+                sessionId,
+                clanId,
+                voiceChannelId,
+                voiceChannelId,
+                true,
+                null,
+                voiceChannelId);
+        }
+        else
+        {
+            await using var update = new NpgsqlCommand("""
+                UPDATE meeting_session
+                SET status = 'live', room_id = @room, started_at = COALESCE(started_at, now()), claim_until = NULL
+                WHERE id = @id;
+                """, connection, transaction);
+            update.Parameters.AddWithValue("id", binding.SessionId);
+            update.Parameters.AddWithValue("room", roomId);
+            await update.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var claim = new NpgsqlCommand("""
+            UPDATE voice_claim
+            SET expires_at = 'infinity'::timestamptz
+            WHERE clan_id = @clan AND voice_channel_id = @voice AND session_id = @session;
+            """, connection, transaction))
+        {
+            claim.Parameters.AddWithValue("clan", clanId);
+            claim.Parameters.AddWithValue("voice", voiceChannelId);
+            claim.Parameters.AddWithValue("session", binding.SessionId);
+            await claim.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return binding;
+    }
+
     public async Task<bool> TryClaimInboxAsync(
         string source,
         string eventKey,
@@ -167,24 +286,47 @@ public sealed class PostgresMeetingRepository : IMeetingRepository
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    public async Task MarkMeetingEndedAsync(string roomId, CancellationToken cancellationToken)
+    public async Task<MeetingSessionBinding?> MarkMeetingEndedAsync(string roomId, CancellationToken cancellationToken)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
-            WITH ended AS (
-              UPDATE meeting_session
-              SET ended_at = COALESCE(ended_at, now()),
-                  status = CASE WHEN status = 'live' THEN 'summary_pending' ELSE status END
-              WHERE room_id = @room
-              RETURNING clan_id, voice_channel_id
-            )
-            DELETE FROM voice_claim claim
-            USING ended
-            WHERE claim.clan_id = ended.clan_id
-              AND claim.voice_channel_id = ended.voice_channel_id;
+            UPDATE meeting_session
+            SET ended_at = COALESCE(ended_at, now()),
+                status = CASE WHEN status = 'live' THEN 'summary_pending' ELSE status END
+            WHERE room_id = @room
+            RETURNING id, clan_id, text_channel_id, voice_channel_id, direct_agent,
+                      notification_message_id, notification_channel_id;
             """, connection);
         command.Parameters.AddWithValue("room", roomId);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        MeetingSessionBinding? binding = null;
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                binding = new MeetingSessionBinding(
+                    reader.GetInt64(0),
+                    reader.GetInt64(1),
+                    reader.GetInt64(2),
+                    reader.GetInt64(3),
+                    reader.GetBoolean(4),
+                    reader.IsDBNull(5) ? null : reader.GetInt64(5),
+                    reader.IsDBNull(6) ? null : reader.GetInt64(6));
+            }
+        }
+
+        if (binding is not null)
+        {
+            await using var deleteClaim = new NpgsqlCommand("""
+                DELETE FROM voice_claim
+                WHERE clan_id = @clan AND voice_channel_id = @voice AND session_id = @session;
+                """, connection);
+            deleteClaim.Parameters.AddWithValue("clan", binding.ClanId);
+            deleteClaim.Parameters.AddWithValue("voice", binding.VoiceChannelId);
+            deleteClaim.Parameters.AddWithValue("session", binding.SessionId);
+            await deleteClaim.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        return binding;
     }
 
     public async Task<bool> StoreSummaryAsync(
@@ -207,15 +349,24 @@ public sealed class PostgresMeetingRepository : IMeetingRepository
               WHERE room_id = @room
                 AND status IN ('live', 'summary_pending')
                 AND (@lease IS NULL OR summary_lease_token = @lease)
-              RETURNING id, clan_id, text_channel_id
+              RETURNING id, clan_id, text_channel_id, notification_channel_id, notification_message_id
             ), saved AS (
               INSERT INTO meeting_summary(session_id, summary_text, transcript, posted)
               SELECT id, @summary, @transcript, TRUE FROM updated
               ON CONFLICT (session_id) DO NOTHING
               RETURNING session_id
             )
-            INSERT INTO outbox_delivery(clan_id, channel_id, kind, dedupe_key, body)
-            SELECT clan_id, text_channel_id, 'MeetingSummary', 'meeting:' || id::text, @summary
+            INSERT INTO outbox_delivery(
+                clan_id, channel_id, kind, dedupe_key, body, meeting_session_id, reply_to_message_id)
+            SELECT clan_id,
+                   text_channel_id,
+                   'MeetingSummary',
+                   'meeting:' || id::text,
+                   @summary,
+                   id,
+                   CASE WHEN notification_channel_id = text_channel_id
+                        THEN notification_message_id
+                        ELSE NULL END
             FROM updated
             ON CONFLICT (dedupe_key) DO NOTHING;
             """, connection);
@@ -331,6 +482,56 @@ public sealed class PostgresMeetingRepository : IMeetingRepository
         command.Parameters.AddWithValue("clan", clanId);
         command.Parameters.AddWithValue("voice", voiceChannelId);
         return await command.ExecuteScalarAsync(cancellationToken) as string;
+    }
+
+    public async Task<MeetingSummaryRecord?> GetSummaryAsync(
+        long clanId,
+        long sessionId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            SELECT s.id, s.voice_channel_id, s.text_channel_id, ms.summary_text,
+                   s.started_at, s.ended_at, s.notification_message_id
+            FROM meeting_summary ms
+            JOIN meeting_session s ON s.id = ms.session_id
+            WHERE s.clan_id = @clan AND s.id = @session AND ms.posted;
+            """, connection);
+        command.Parameters.AddWithValue("clan", clanId);
+        command.Parameters.AddWithValue("session", sessionId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new MeetingSummaryRecord(
+            reader.GetInt64(0),
+            reader.IsDBNull(1) ? 0 : reader.GetInt64(1),
+            reader.GetInt64(2),
+            reader.GetString(3),
+            reader.IsDBNull(4) ? null : reader.GetFieldValue<DateTimeOffset>(4),
+            reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5),
+            reader.IsDBNull(6) ? null : reader.GetInt64(6));
+    }
+
+    public async Task SetSessionNotificationMessageAsync(
+        long sessionId,
+        long channelId,
+        long messageId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            UPDATE meeting_session
+            SET notification_channel_id = @channel,
+                notification_message_id = @message
+            WHERE id = @session;
+            """, connection);
+        command.Parameters.AddWithValue("session", sessionId);
+        command.Parameters.AddWithValue("channel", channelId);
+        command.Parameters.AddWithValue("message", messageId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task ExpireSuggestedAsync(DateTimeOffset now, CancellationToken cancellationToken)

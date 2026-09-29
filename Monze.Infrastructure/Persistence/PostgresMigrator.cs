@@ -14,7 +14,13 @@ public static class PostgresMigrator
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var table = new NpgsqlCommand(
-            "SELECT to_regclass('public.schema_migrations') IS NOT NULL;",
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM pg_class AS c
+                JOIN pg_namespace AS n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relname = 'schema_migrations');
+            """,
             connection);
         var schemaExists = (bool?)await table.ExecuteScalarAsync(cancellationToken) ?? false;
         if (!schemaExists)

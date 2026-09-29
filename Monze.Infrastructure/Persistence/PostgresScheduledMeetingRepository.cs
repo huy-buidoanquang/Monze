@@ -16,6 +16,8 @@ public sealed class PostgresScheduledMeetingRepository : IScheduledMeetingReposi
         DateTimeOffset claimUntil,
         DateTimeOffset? nextRunAt,
         string announcementBody,
+        string contentJson,
+        bool mentionEveryone,
         CancellationToken cancellationToken)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
@@ -95,8 +97,9 @@ public sealed class PostgresScheduledMeetingRepository : IScheduledMeetingReposi
         }
 
         await using (var outbox = new NpgsqlCommand("""
-            INSERT INTO outbox_delivery(clan_id, channel_id, kind, dedupe_key, body)
-            VALUES (@clan, @channel, 'Announcement', @dedupe, @body)
+            INSERT INTO outbox_delivery(
+                clan_id, channel_id, kind, dedupe_key, body, mention_everyone, content_json, meeting_session_id)
+            VALUES (@clan, @channel, 'Announcement', @dedupe, @body, @mention, @content, @session)
             ON CONFLICT (dedupe_key) DO NOTHING;
             """, connection, transaction))
         {
@@ -106,6 +109,9 @@ public sealed class PostgresScheduledMeetingRepository : IScheduledMeetingReposi
                 "dedupe",
                 $"meeting-schedule:{schedule.Id}:{schedule.NextRunAt.UtcTicks}");
             outbox.Parameters.AddWithValue("body", announcementBody);
+            outbox.Parameters.AddWithValue("mention", mentionEveryone);
+            outbox.Parameters.AddWithValue("content", contentJson);
+            outbox.Parameters.AddWithValue("session", sessionId);
             await outbox.ExecuteNonQueryAsync(cancellationToken);
         }
 

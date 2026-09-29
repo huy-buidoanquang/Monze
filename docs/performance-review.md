@@ -1,5 +1,7 @@
 # Monze performance review
 
+Entries below the current cleanup baseline may mention community commands that were exercised before migration `018`. Those commands are historical evidence only and are not part of the current Monze source, database or command surface.
+
 ## Current baseline
 
 - One bot session and one process are the target topology.

@@ -17,7 +17,8 @@ public sealed class MemoryWelcomeDraftStore : IWelcomeDraftStore
         long channelId,
         bool enabled,
         WelcomeEmbedSettings draft,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        string? text = null)
     {
         CleanupExpired(now);
         if (_tickets.Count >= MaxEntries)
@@ -34,7 +35,8 @@ public sealed class MemoryWelcomeDraftStore : IWelcomeDraftStore
             channelId,
             enabled,
             draft,
-            now.Add(Lifetime));
+            now.Add(Lifetime),
+            text);
 
         if (!_tickets.TryAdd(token, ticket))
         {

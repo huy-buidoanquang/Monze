@@ -53,35 +53,27 @@ public sealed class MonzeCommandRateLimiter
     private static string NormalizeCommand(ReadOnlySpan<char> command)
     {
         command = command.Trim();
-        if (command.Equals(MonzeCommandNames.Summarize, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Summarize;
+        if (command.Equals(MonzeCommandNames.Ai, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Ai;
         if (command.Equals(MonzeCommandNames.Translate, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Translate;
-        if (command.Equals(MonzeCommandNames.Rewrite, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Rewrite;
-        if (command.Equals(MonzeCommandNames.Shorten, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Shorten;
+        if (command.Equals(MonzeCommandNames.Composer, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Composer;
+        if (command.Equals(MonzeCommandNames.Simplify, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Simplify;
         if (command.Equals(MonzeCommandNames.Meeting, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Meeting;
         if (command.Equals(MonzeCommandNames.Summary, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Summary;
         if (command.Equals(MonzeCommandNames.Setup, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Setup;
         if (command.Equals(MonzeCommandNames.Welcome, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Welcome;
-        if (command.Equals(MonzeCommandNames.Announce, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Announce;
-        if (command.Equals(MonzeCommandNames.Outbox, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Outbox;
-        if (command.Equals(MonzeCommandNames.Faq, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Faq;
         if (command.Equals(MonzeCommandNames.Role, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Role;
         if (command.Equals(MonzeCommandNames.Monze, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Monze;
         if (command.Equals(MonzeCommandNames.Help, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Help;
-        if (command.Equals(MonzeCommandNames.Event, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Event;
-        if (command.Equals(MonzeCommandNames.Info, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Info;
-        if (command.Equals(MonzeCommandNames.Points, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Points;
-        if (command.Equals(MonzeCommandNames.Leaderboard, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Leaderboard;
-        if (command.Equals(MonzeCommandNames.Spin, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Spin;
-        if (command.Equals(MonzeCommandNames.Topic, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Topic;
         return MonzeCommandNames.Unknown;
     }
 
     private MonzeRateLimitRule GetRule(string command)
     {
-        if (command is MonzeCommandNames.Summarize
+        if (command is MonzeCommandNames.Ai
+            or MonzeCommandNames.AiSummary
             or MonzeCommandNames.Translate
-            or MonzeCommandNames.Rewrite
-            or MonzeCommandNames.Shorten)
+            or MonzeCommandNames.Composer
+            or MonzeCommandNames.Simplify)
         {
             return new MonzeRateLimitRule(MonzeRateLimitBucket.Ai, _options.AiLimit, _options.AiWindow);
         }
@@ -93,9 +85,6 @@ public sealed class MonzeCommandRateLimiter
 
         if (command is MonzeCommandNames.Setup
             or MonzeCommandNames.Welcome
-            or MonzeCommandNames.Announce
-            or MonzeCommandNames.Outbox
-            or MonzeCommandNames.Faq
             or MonzeCommandNames.Role)
         {
             return new MonzeRateLimitRule(MonzeRateLimitBucket.Admin, _options.AdminLimit, _options.AdminWindow);

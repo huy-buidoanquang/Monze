@@ -54,6 +54,7 @@ internal static class Program
             Math.Clamp(builder.Configuration.GetValue("Monze:RateLimit:MaxEntries", 100_000), 1024, 1_000_000))));
         builder.Services.AddSingleton<IReadModelCache, DisabledReadModelCache>();
         builder.Services.AddSingleton<IWelcomeDraftStore, MemoryWelcomeDraftStore>();
+        builder.Services.AddSingleton<IWelcomeSetupDraftStore, MemoryWelcomeSetupDraftStore>();
         var redis = builder.Configuration["Monze:Redis"];
         var botId = builder.Configuration.GetValue<long>("Mezon:BotId");
         if (!migrateOnly && !string.IsNullOrWhiteSpace(redis))
@@ -93,16 +94,13 @@ internal static class Program
         builder.Services.AddSingleton<IScheduledMeetingRepository, PostgresScheduledMeetingRepository>();
         builder.Services.AddSingleton<ISchedulingRepository, PostgresSchedulingRepository>();
         builder.Services.AddSingleton<IOutboxRepository, PostgresOutboxRepository>();
-        builder.Services.AddSingleton<ICommunityRepository, PostgresCommunityRepository>();
         builder.Services.AddSingleton<IAiUsageRepository, PostgresAiUsageRepository>();
         builder.Services.AddSingleton<IMessageHistoryRepository, PostgresMessageHistoryRepository>();
         builder.Services.AddSingleton<ICommandInboxRepository, PostgresCommandInboxRepository>();
         builder.Services.AddSingleton(sp => new MonzeApp(
             sp.GetRequiredService<IAuthorizationRepository>(),
-            sp.GetRequiredService<ICommunityRepository>(),
             sp.GetRequiredService<IMeetingRepository>(),
             sp.GetRequiredService<ISchedulingRepository>(),
-            sp.GetRequiredService<IOutboxRepository>(),
             sp.GetRequiredService<IAiUsageRepository>(),
             sp.GetRequiredService<IMessageHistoryRepository>(),
             sp.GetRequiredService<IWelcomeDraftStore>(),

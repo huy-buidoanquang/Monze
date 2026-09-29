@@ -8,4 +8,8 @@ public sealed record DueOutbox(
     int Attempts,
     long? ExternalMessageId,
     string LeaseToken,
-    DateTimeOffset DueAt);
+    DateTimeOffset DueAt,
+    bool MentionEveryone = false,
+    string? ContentJson = null,
+    long? MeetingSessionId = null,
+    long? ReplyToMessageId = null);

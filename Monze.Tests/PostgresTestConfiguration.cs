@@ -25,18 +25,34 @@ internal static class PostgresTestConfiguration
             }
         }
 
-        var secretsPath = Path.Combine(Path.GetDirectoryName(configPath)!, "appsettings.secrets.json");
-        if (!File.Exists(secretsPath))
+        for (var directory = new DirectoryInfo(Path.GetDirectoryName(configPath)!);
+            directory is not null;
+            directory = directory.Parent)
         {
-            return null;
+            var candidates = new[]
+            {
+                Path.Combine(directory.FullName, "appsettings.Development.local.json"),
+                Path.Combine(directory.FullName, "appsettings.secrets.json")
+            };
+            foreach (var secretsPath in candidates)
+            {
+                if (!File.Exists(secretsPath))
+                {
+                    continue;
+                }
+
+                using var secrets = JsonDocument.Parse(File.ReadAllText(secretsPath));
+                if (secrets.RootElement.TryGetProperty("Monze", out var secretMonze)
+                    && secretMonze.TryGetProperty("Postgres", out var secretPostgres)
+                    && secretPostgres.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(secretPostgres.GetString()))
+                {
+                    return secretPostgres.GetString();
+                }
+            }
         }
 
-        using var secrets = JsonDocument.Parse(File.ReadAllText(secretsPath));
-        return secrets.RootElement.TryGetProperty("Monze", out var secretMonze)
-            && secretMonze.TryGetProperty("Postgres", out var secretPostgres)
-            && secretPostgres.ValueKind == JsonValueKind.String
-            ? secretPostgres.GetString()
-            : null;
+        return null;
     }
 
     private static string? FindConfigPath()

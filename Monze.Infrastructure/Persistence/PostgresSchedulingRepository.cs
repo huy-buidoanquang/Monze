@@ -15,6 +15,7 @@ public sealed class PostgresSchedulingRepository : ISchedulingRepository
         long clanId,
         long channelId,
         long userId,
+        string name,
         MeetingScheduleKind kind,
         string whenText,
         string timeZoneId,
@@ -24,18 +25,91 @@ public sealed class PostgresSchedulingRepository : ISchedulingRepository
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
             INSERT INTO meeting_schedule(
-                clan_id, channel_id, requester_id, kind, when_text, timezone, next_run_at)
-            VALUES (@clan, @channel, @requester, @kind, @when, @timezone, @next)
+                clan_id, channel_id, requester_id, title, kind, when_text, timezone,
+                next_run_at)
+            VALUES (@clan, @channel, @requester, @title, @kind, @when, @timezone,
+                    @next)
             RETURNING id;
             """, connection);
         command.Parameters.AddWithValue("clan", clanId);
         command.Parameters.AddWithValue("channel", channelId);
         command.Parameters.AddWithValue("requester", userId);
+        command.Parameters.AddWithValue("title", string.IsNullOrWhiteSpace(name) ? "Cuộc họp" : name);
         command.Parameters.AddWithValue("kind", kind.ToString());
         command.Parameters.AddWithValue("when", whenText);
         command.Parameters.AddWithValue("timezone", timeZoneId);
         command.Parameters.AddWithValue("next", nextRunAt);
         return (long)(await command.ExecuteScalarAsync(cancellationToken) ?? 0L);
+    }
+
+    public async Task<IReadOnlyList<MeetingScheduleSummary>> ListMeetingSchedulesAsync(
+        long clanId,
+        long channelId,
+        long userId,
+        bool includeAll,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var rows = new List<MeetingScheduleSummary>(Math.Clamp(limit, 1, 50));
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            SELECT id, title, kind, next_run_at, timezone, requester_id
+            FROM meeting_schedule
+            WHERE clan_id = @clan
+              AND channel_id = @channel
+              AND status IN ('active', 'running')
+              AND (@all OR requester_id = @user)
+            ORDER BY next_run_at, id
+            LIMIT @limit;
+            """, connection);
+        command.Parameters.AddWithValue("clan", clanId);
+        command.Parameters.AddWithValue("channel", channelId);
+        command.Parameters.AddWithValue("user", userId);
+        command.Parameters.AddWithValue("all", includeAll);
+        command.Parameters.AddWithValue("limit", Math.Clamp(limit, 1, 50));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var kind = Enum.TryParse<MeetingScheduleKind>(reader.GetString(2), true, out var parsed)
+                ? parsed
+                : MeetingScheduleKind.Once;
+            rows.Add(new MeetingScheduleSummary(
+                reader.GetInt64(0),
+                reader.GetString(1),
+                kind,
+                reader.GetFieldValue<DateTimeOffset>(3),
+                reader.GetString(4),
+                reader.GetInt64(5)));
+        }
+
+        return rows;
+    }
+
+    public async Task<bool> CancelMeetingScheduleAsync(
+        long clanId,
+        long channelId,
+        long userId,
+        bool includeAll,
+        long scheduleId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            UPDATE meeting_schedule
+            SET status = 'cancelled', locked_until = NULL, lease_token = NULL,
+                last_error = NULL
+            WHERE id = @id
+              AND clan_id = @clan
+              AND channel_id = @channel
+              AND status IN ('active', 'running')
+              AND (@all OR requester_id = @user);
+            """, connection);
+        command.Parameters.AddWithValue("id", scheduleId);
+        command.Parameters.AddWithValue("clan", clanId);
+        command.Parameters.AddWithValue("channel", channelId);
+        command.Parameters.AddWithValue("user", userId);
+        command.Parameters.AddWithValue("all", includeAll);
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
     public async Task<IReadOnlyList<DueMeetingSchedule>> ClaimDueMeetingSchedulesAsync(
@@ -61,7 +135,7 @@ public sealed class PostgresSchedulingRepository : ISchedulingRepository
             WHERE item.id = due.id
             RETURNING item.id, item.clan_id, item.channel_id, item.requester_id,
                       item.kind, item.when_text, item.timezone, item.next_run_at,
-                      item.lease_token;
+                      item.lease_token, item.title;
             """, connection);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -81,7 +155,8 @@ public sealed class PostgresSchedulingRepository : ISchedulingRepository
                 reader.GetString(5),
                 reader.GetString(6),
                 reader.GetFieldValue<DateTimeOffset>(7),
-                reader.GetString(8)));
+                reader.GetString(8),
+                reader.GetString(9)));
         }
 
         return rows;

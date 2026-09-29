@@ -1,12 +1,16 @@
 using Mezon.Net.Sdk.Agent;
+using Mezon.Net.Sdk;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Configuration;
 using Monze.Application;
+using Monze.Ui;
 
 namespace Monze;
 
 public sealed partial class MonzeBot
 {
     private async Task ProcessAgentAsync(
+        MezonClient client,
         AgentSseSessionEvent evt,
         AgentEventKind kind,
         CancellationToken cancellationToken)
@@ -29,7 +33,11 @@ public sealed partial class MonzeBot
 
             if (kind == AgentEventKind.Ended)
             {
-                await _meeting.MarkMeetingEndedAsync(roomId, cancellationToken);
+                var ended = await _meeting.MarkMeetingEndedAsync(roomId, cancellationToken);
+                if (ended is not null)
+                {
+                    await UpdateAgentStatusAsync(client, ended, summarizing: true, cancellationToken);
+                }
                 return;
             }
 
@@ -56,7 +64,16 @@ public sealed partial class MonzeBot
 
             if (payload.ClanId is long clanId)
             {
-                await _meeting.BindMeetingRoomAsync(clanId, voiceId, roomId, cancellationToken);
+                var binding = await _meeting.BindAgentSessionAsync(
+                    clanId,
+                    voiceId,
+                    roomId,
+                    _configuration.GetValue<long>("Mezon:BotId"),
+                    cancellationToken);
+                if (binding is not null)
+                {
+                    await UpdateAgentStatusAsync(client, binding, summarizing: false, cancellationToken);
+                }
             }
             else
             {
@@ -76,6 +93,37 @@ public sealed partial class MonzeBot
 
             throw;
         }
+    }
+
+    private async Task UpdateAgentStatusAsync(
+        MezonClient client,
+        MeetingSessionBinding binding,
+        bool summarizing,
+        CancellationToken cancellationToken)
+    {
+        // Meeting sessions created by Monze always notify the text channel
+        // that started the meeting. A direct Agent session has the voice ID
+        // copied into TextChannelId because no source text channel exists.
+        var channelId = binding.TextChannelId;
+        var content = summarizing
+            ? MonzeMessageBuilder.AgentSummarizing()
+            : MonzeMessageBuilder.AgentWaiting();
+        if (binding.NotificationMessageId is long messageId
+            && messageId > 0
+            && binding.NotificationChannelId == channelId)
+        {
+            var channel = await client.GetChannelAsync(channelId, cancellationToken);
+            await channel.UpdateMessageAsync(messageId, content);
+            return;
+        }
+
+        var target = await client.GetChannelAsync(channelId, cancellationToken);
+        var ack = await target.SendAsync(content);
+        await _meeting.SetSessionNotificationMessageAsync(
+            binding.SessionId,
+            channelId,
+            ack.MessageId,
+            cancellationToken);
     }
 
     private async Task<string?> FetchSummaryWithRetryAsync(

@@ -11,4 +11,5 @@ public sealed record DueMeetingSchedule(
     string WhenText,
     string TimeZoneId,
     DateTimeOffset NextRunAt,
-    string LeaseToken);
+    string LeaseToken,
+    string Name = "Cuộc họp");

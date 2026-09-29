@@ -6,4 +6,5 @@ public sealed record WelcomeDraftTicket(
     long ChannelId,
     bool Enabled,
     WelcomeEmbedSettings Draft,
-    DateTimeOffset ExpiresAt);
+    DateTimeOffset ExpiresAt,
+    string? Text = null);

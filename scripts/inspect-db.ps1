@@ -104,21 +104,15 @@ WHERE clan_id = @clan;
     Add-InspectionRows $roleRules
 
     $settings = @(Invoke-InspectionQuery $connection 'clan_settings' @'
-SELECT welcome_enabled, version
+SELECT welcome_enabled,
+       role_enabled,
+       length(welcome_text) AS welcome_text_length,
+       welcome_embed IS NOT NULL AS has_welcome_embed,
+       version
 FROM clan_settings
 WHERE clan_id = @clan;
 '@ @{ clan = $ClanId })
     Add-InspectionRows $settings
-
-    $activity = @(Invoke-InspectionQuery $connection 'activity' @'
-SELECT count(*) AS ledger_rows,
-       coalesce(sum(delta), 0) AS total_delta,
-       (SELECT count(*) FROM activity_balance WHERE clan_id = @clan) AS balance_rows,
-       (SELECT coalesce(sum(points), 0) FROM activity_balance WHERE clan_id = @clan) AS balance_points
-FROM activity_ledger
-WHERE clan_id = @clan;
-'@ @{ clan = $ClanId })
-    Add-InspectionRows $activity
 
     $meetingSchedule = @(Invoke-InspectionQuery $connection 'meeting_schedule' @'
 SELECT kind, status, count(*) AS rows
@@ -138,6 +132,15 @@ ORDER BY status;
 '@ @{ clan = $ClanId })
     Add-InspectionRows $meetingSessions
 
+    $meetingSummaries = @(Invoke-InspectionQuery $connection 'meeting_summary' @'
+SELECT count(*) AS rows,
+       count(*) FILTER (WHERE posted) AS posted_rows
+FROM meeting_summary ms
+JOIN meeting_session s ON s.id = ms.session_id
+WHERE s.clan_id = @clan;
+'@ @{ clan = $ClanId })
+    Add-InspectionRows $meetingSummaries
+
     $commandInbox = @(Invoke-InspectionQuery $connection 'command_inbox' @'
 SELECT status, count(*) AS rows
 FROM command_inbox
@@ -156,28 +159,51 @@ ORDER BY kind, status;
 '@ @{ clan = $ClanId })
     Add-InspectionRows $outbox
 
-    $faq = @(Invoke-InspectionQuery $connection 'faq' @'
-SELECT count(*) AS rows
-FROM knowledge_entry
-WHERE clan_id = @clan;
-'@ @{ clan = $ClanId })
-    Add-InspectionRows $faq
+    $outboxKinds = @(Invoke-InspectionQuery $connection 'outbox_kinds' @'
+SELECT kind, count(*) AS rows
+FROM outbox_delivery
+GROUP BY kind
+ORDER BY kind;
+'@)
+    Add-InspectionRows $outboxKinds
 
-    $topics = @(Invoke-InspectionQuery $connection 'topic_prompt' @'
-SELECT count(*) AS rows,
-       count(*) FILTER (WHERE last_used_at IS NULL) AS unused_rows
-FROM topic_prompt
-WHERE clan_id = @clan;
-'@ @{ clan = $ClanId })
-    Add-InspectionRows $topics
+    $outboxColumns = @(Invoke-InspectionQuery $connection 'outbox_columns' @'
+SELECT EXISTS (
+           SELECT 1 FROM information_schema.columns
+           WHERE table_schema = 'public'
+             AND table_name = 'outbox_delivery'
+             AND column_name = 'mention_everyone') AS mention_everyone,
+       EXISTS (
+           SELECT 1 FROM information_schema.columns
+           WHERE table_schema = 'public'
+             AND table_name = 'outbox_delivery'
+             AND column_name = 'content_json') AS content_json;
+'@)
+    Add-InspectionRows $outboxColumns
 
-    $wheelCooldown = @(Invoke-InspectionQuery $connection 'wheel_cooldown' @'
-SELECT count(*) AS rows,
-       count(*) FILTER (WHERE next_allowed_at > now()) AS active_rows
-FROM wheel_cooldown
-WHERE clan_id = @clan;
-'@ @{ clan = $ClanId })
-    Add-InspectionRows $wheelCooldown
+    $schema = @(Invoke-InspectionQuery $connection 'retained_schema' @'
+SELECT name,
+       to_regclass('public.' || name)::text IS NOT NULL AS present
+FROM unnest(ARRAY[
+    'clan_registry', 'clan_settings', 'clan_admin', 'channel_policy',
+    'ai_usage', 'role_rule', 'role_grant', 'meeting_session',
+    'voice_claim', 'meeting_summary', 'meeting_schedule', 'agent_event',
+    'inbox_event', 'command_inbox', 'outbox_delivery', 'schema_migrations'
+]::text[]) AS names(name)
+ORDER BY name;
+'@)
+    Add-InspectionRows $schema
+
+    $removedSchema = @(Invoke-InspectionQuery $connection 'removed_schema' @'
+SELECT name,
+       to_regclass('public.' || name)::text IS NOT NULL AS present
+FROM unnest(ARRAY[
+    'community_event', 'signup_entry', 'knowledge_entry', 'activity_ledger',
+    'activity_balance', 'game_attempt', 'wheel_cooldown', 'topic_prompt'
+]::text[]) AS names(name)
+ORDER BY name;
+'@)
+    Add-InspectionRows $removedSchema
 
     $policy = @(Invoke-InspectionQuery $connection 'channel_policy' @'
 SELECT persist_messages, has_gap
@@ -194,7 +220,7 @@ WHERE clan_id = @clan AND channel_id = @channel;
         if ($roleMigration.Count -ne 1) {
             throw "DB assertion failed: migration 007_roles is not applied."
         }
-        foreach ($migrationVersion in @('008_topic_prompts', '009_wheel_cooldown', '010_role_rule_conditions', '011_meeting_summary_retry', '012_meeting_request_cleanup', '013_meeting_summary_leases', '014_command_inbox', '015_event_capacity')) {
+        foreach ($migrationVersion in @('008_topic_prompts', '009_wheel_cooldown', '010_role_rule_conditions', '011_meeting_summary_retry', '012_meeting_request_cleanup', '013_meeting_summary_leases', '014_command_inbox', '015_event_capacity', '017_meeting_schedule_details', '018_remove_community_features', '019_meeting_invitation_delivery', '020_role_automation', '021_agent_summary_binding')) {
             $migration = @($migrations | Where-Object { [string]$_.version -like "*$migrationVersion" })
             if ($migration.Count -ne 1) {
                 throw "DB assertion failed: migration $migrationVersion is not applied."
@@ -203,11 +229,21 @@ WHERE clan_id = @clan AND channel_id = @channel;
         if ($settings.Count -ne 1) {
             throw "DB assertion failed: clan $ClanId has no settings row."
         }
-        if ($activity.Count -ne 1 -or [int64]$activity[0].total_delta -ne [int64]$activity[0].balance_points) {
-            throw "DB assertion failed: activity ledger and balance totals differ for clan $ClanId."
+        if (-not [bool]$settings[0].PSObject.Properties['role_enabled']) {
+            throw 'DB assertion failed: role_enabled is missing from clan_settings.'
         }
-        if ($topics.Count -ne 1 -or [int64]$topics[0].rows -lt 1) {
-            throw "DB assertion failed: clan $ClanId has no topic prompts."
+        if (@($schema | Where-Object { -not [bool]$_.present }).Count -gt 0) {
+            throw "DB assertion failed: one or more retained Monze tables are missing."
+        }
+        if (@($removedSchema | Where-Object { [bool]$_.present }).Count -gt 0) {
+            throw "DB assertion failed: one or more removed community tables are still present."
+        }
+        if ($outboxColumns.Count -ne 1 -or -not [bool]$outboxColumns[0].mention_everyone -or -not [bool]$outboxColumns[0].content_json) {
+            throw 'DB assertion failed: meeting invitation outbox columns are missing.'
+        }
+        $obsoleteOutbox = @($outboxKinds | Where-Object { [string]$_.kind -notin @('Announcement', 'MeetingSummary') })
+        if ($obsoleteOutbox.Count -gt 0) {
+            throw "DB assertion failed: obsolete outbox kinds remain for clan $ClanId."
         }
     }
 

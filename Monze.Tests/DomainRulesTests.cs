@@ -50,29 +50,10 @@ public class DomainRulesTests
     }
 
     [Theory]
-    [InlineData(OutboxKind.CommandReply, false, 0, OutboxAction.RetryOnce)]
     [InlineData(OutboxKind.Announcement, false, 1, OutboxAction.HoldForAdmin)]
-    [InlineData(OutboxKind.Reminder, true, 0, OutboxAction.AlreadyDelivered)]
+    [InlineData(OutboxKind.MeetingSummary, true, 0, OutboxAction.AlreadyDelivered)]
     public void Outbox_policy(OutboxKind kind, bool hasId, int attempts, OutboxAction expected)
         => Assert.Equal(expected, OutboxPolicy.Decide(kind, hasId, attempts));
-
-    [Fact]
-    public void Points_role_is_not_in_wave1_and_ledger_rejects_duplicates()
-    {
-        Assert.False(RoleRules.AllowedInWave1(RoleRuleKind.MinPoints));
-        Assert.True(PointsLedger.TryApply(0, 1, 0, 20, false, out var next));
-        Assert.Equal(1, next);
-        Assert.False(PointsLedger.TryApply(1, 1, 0, 20, true, out _));
-        Assert.False(PointsLedger.TryApply(1, 1, 20, 20, false, out _));
-    }
-
-    [Fact]
-    public void Wheel_respects_weights()
-    {
-        Assert.Equal(0, Wheel.PickIndex([5, 3, 1], 4));
-        Assert.Equal(1, Wheel.PickIndex([5, 3, 1], 5));
-        Assert.Equal(2, Wheel.PickIndex([5, 3, 1], 8));
-    }
 
     [Fact]
     public void Meeting_parser_accepts_now()
@@ -88,6 +69,53 @@ public class DomainRulesTests
         Assert.True(MeetingCommandParser.TryParse(["DAILY", "09:00", "local"], out var request));
         Assert.Equal(MeetingScheduleKind.Daily, request!.Kind);
         Assert.Equal("09:00 local", request.WhenText);
+    }
+
+    [Fact]
+    public void Meeting_parser_rejects_removed_repeat_syntax()
+    {
+        Assert.False(MeetingCommandParser.TryParse(
+            ["Sprint", "Review", "28/09/2026", "18:30", "repeat", "30"],
+            out _));
+    }
+
+    [Theory]
+    [InlineData("once", MeetingScheduleKind.Once)]
+    [InlineData("daily", MeetingScheduleKind.Daily)]
+    [InlineData("weekly", MeetingScheduleKind.Weekly)]
+    public void Meeting_parser_accepts_named_schedule_suffix(string suffix, MeetingScheduleKind expected)
+    {
+        Assert.True(MeetingCommandParser.TryParse(
+            ["Team", "Sync", "28/09/2026", "18:30", suffix],
+            out var request));
+
+        Assert.Equal(expected, request!.Kind);
+    }
+
+    [Fact]
+    public void Meeting_parser_accepts_cancel_id_and_rejects_invalid_ids()
+    {
+        Assert.True(MeetingCommandParser.TryParse(["cancel", "42"], out var request));
+        Assert.Equal(42, request!.CancelScheduleId);
+        Assert.False(MeetingCommandParser.TryParse(["cancel", "0"], out _));
+        Assert.False(MeetingCommandParser.TryParse(["cancel", "abc"], out _));
+    }
+
+    [Fact]
+    public void Meeting_schedule_calculator_accepts_vietnamese_date_format()
+    {
+        var now = new DateTimeOffset(2026, 9, 28, 8, 0, 0, TimeSpan.Zero);
+        var ok = MeetingScheduleCalculator.TryGetNext(
+            MeetingScheduleKind.Once,
+            "29/09/2026 18:30",
+            "Asia/Ho_Chi_Minh",
+            now,
+            out var next,
+            out var error);
+
+        Assert.True(ok, error);
+        Assert.Equal(11, next.Hour);
+        Assert.Equal(30, next.Minute);
     }
 
     [Fact]
@@ -179,7 +207,7 @@ public class DomainRulesTests
     {
         var options = new MonzeCommandOptions("*", null);
 
-        Assert.Equal("*points", options.Command(MonzeCommandNames.Points));
+        Assert.Equal("*role", options.Command(MonzeCommandNames.Role));
         Assert.Equal("*help", options.HelpCommand);
     }
 
@@ -188,7 +216,7 @@ public class DomainRulesTests
     {
         var options = new MonzeCommandOptions(string.Empty, null);
 
-        Assert.Equal("points", options.Command(MonzeCommandNames.Points));
+        Assert.Equal("role", options.Command(MonzeCommandNames.Role));
         Assert.Equal("help", options.HelpCommand);
     }
 
@@ -207,10 +235,10 @@ public class DomainRulesTests
             MaxEntries: 16));
         var now = DateTimeOffset.UtcNow;
 
-        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Points, now, out _));
-        Assert.False(limiter.TryAcquire(1, 10, MonzeCommandNames.Points, now, out var retry));
+        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Role, now, out _));
+        Assert.False(limiter.TryAcquire(1, 10, MonzeCommandNames.Role, now, out var retry));
         Assert.True(retry > TimeSpan.Zero);
-        Assert.True(limiter.TryAcquire(2, 10, MonzeCommandNames.Points, now, out _));
+        Assert.True(limiter.TryAcquire(2, 10, MonzeCommandNames.Role, now, out _));
     }
 
     [Fact]
@@ -228,8 +256,8 @@ public class DomainRulesTests
             MaxEntries: 1));
         var now = DateTimeOffset.UtcNow;
 
-        Assert.True(limiter.TryAcquire(1, 1, MonzeCommandNames.Points, now, out _));
-        Assert.True(limiter.TryAcquire(2, 2, MonzeCommandNames.Points, now.AddSeconds(11), out _));
+        Assert.True(limiter.TryAcquire(1, 1, MonzeCommandNames.Role, now, out _));
+        Assert.True(limiter.TryAcquire(2, 2, MonzeCommandNames.Role, now.AddSeconds(11), out _));
     }
 
     [Fact]
@@ -285,7 +313,7 @@ public class DomainRulesTests
             AdminWindow: TimeSpan.FromMinutes(1),
             MaxEntries: 16));
         var now = DateTimeOffset.UtcNow;
-        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Points, now, out _));
+        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Role, now, out _));
 
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -294,7 +322,7 @@ public class DomainRulesTests
 
         for (var i = 0; i < 1000; i++)
         {
-            Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Points, now, out _));
+            Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Role, now, out _));
         }
 
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
@@ -306,8 +334,8 @@ public class DomainRulesTests
     {
         Assert.True(RoleRules.TryParseKind("join", out var join));
         Assert.Equal(RoleRuleKind.OnJoin, join);
-        Assert.True(RoleRules.TryParseKind("points", out var points));
-        Assert.Equal(RoleRuleKind.MinPoints, points);
+        Assert.False(RoleRules.TryParseKind("points", out _));
+        Assert.False(RoleRules.TryParseKind("min_points", out _));
         Assert.Equal("existing_role", RoleRules.ToStorageName(RoleRuleKind.ExistingRole));
         Assert.True(RoleRules.MatchesExistingRole(new HashSet<long> { 7, 11 }, 11));
         Assert.False(RoleRules.MatchesExistingRole(new HashSet<long> { 7 }, 11));
@@ -319,7 +347,5 @@ public class DomainRulesTests
         var now = DateTimeOffset.UtcNow;
         Assert.True(RoleRules.MatchesTenure(now.AddDays(-30), now, TimeSpan.FromDays(30)));
         Assert.False(RoleRules.MatchesTenure(now.AddDays(-29), now, TimeSpan.FromDays(30)));
-        Assert.True(RoleRules.MatchesPoints(30, 30));
-        Assert.False(RoleRules.MatchesPoints(29, 30));
     }
 }
