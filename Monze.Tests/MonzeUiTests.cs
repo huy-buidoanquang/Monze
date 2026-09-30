@@ -205,6 +205,39 @@ public sealed class MonzeUiTests
     }
 
     [Fact]
+    public void Non_interactive_payloads_keep_loading_avatar_and_agent_messages_public()
+    {
+        var loading = MonzeMessageBuilder.AiLoading();
+        var avatar = MonzeMessageBuilder.Avatar(new MonzeAvatarTarget(
+            7,
+            "Người dùng",
+            "https://cdn.example/avatar.png"));
+        var waiting = MonzeMessageBuilder.AgentWaiting();
+        var summarizing = MonzeMessageBuilder.AgentSummarizing();
+        var summary = MonzeMessageBuilder.MeetingSummary("Nội dung cuộc họp.");
+
+        Assert.Contains("\"type\":6", loading.RawJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"type\":1", loading.RawJson, StringComparison.Ordinal);
+        Assert.Null(avatar.Components);
+        Assert.Null(waiting.Components);
+        Assert.Null(summarizing.Components);
+        Assert.Null(summary.Components);
+    }
+
+    [Fact]
+    public void Interactive_help_and_setup_payloads_keep_controls()
+    {
+        var options = new MonzeCommandOptions("*", MonzeCommandNames.Monze);
+        var help = MonzeMessageBuilder.HelpPage("commands", options, isOwner: true);
+        var setup = MonzeMessageBuilder.WelcomeSettings(null);
+
+        Assert.NotNull(help.Components);
+        Assert.NotNull(setup.Components);
+        Assert.Contains("\"type\":1", help.RawJson, StringComparison.Ordinal);
+        Assert.Contains("\"type\":5", setup.RawJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Welcome_preview_carries_the_server_draft_token_on_save_button()
     {
         const string token = "ABC123";

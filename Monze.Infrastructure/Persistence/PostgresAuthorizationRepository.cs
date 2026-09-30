@@ -49,6 +49,7 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
 
     public async Task<bool> SetDelegateAsync(
         long clanId,
+        long actorUserId,
         long userId,
         bool enabled,
         CancellationToken cancellationToken)
@@ -60,25 +61,44 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
               SELECT @clan, @user
               WHERE EXISTS (
                 SELECT 1 FROM clan_registry
-                WHERE clan_id = @clan AND inactive_reason IS NULL
+                WHERE clan_id = @clan
+                  AND owner_id = @actor
+                  AND inactive_reason IS NULL
               )
               ON CONFLICT (clan_id, user_id) DO NOTHING;
               """
             : """
               DELETE FROM clan_admin
-              WHERE clan_id = @clan AND user_id = @user;
+              WHERE clan_id = @clan
+                AND user_id = @user
+                AND EXISTS (
+                  SELECT 1 FROM clan_registry
+                  WHERE clan_id = @clan
+                    AND owner_id = @actor
+                    AND inactive_reason IS NULL
+                );
               """, connection);
         command.Parameters.AddWithValue("clan", clanId);
+        command.Parameters.AddWithValue("actor", actorUserId);
         command.Parameters.AddWithValue("user", userId);
         return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
     }
 
-    public async Task<long> SetWelcomeAsync(long clanId, bool enabled, string? text, CancellationToken cancellationToken)
+    public async Task<long> SetWelcomeAsync(long clanId, long actorUserId, bool enabled, string? text, CancellationToken cancellationToken)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
             INSERT INTO clan_settings(clan_id, welcome_enabled, welcome_text)
-            VALUES (@clan, @enabled, @text)
+            SELECT @clan, @enabled, @text
+            WHERE EXISTS (
+              SELECT 1
+              FROM clan_registry c
+              LEFT JOIN clan_admin a
+                ON a.clan_id = c.clan_id AND a.user_id = @actor
+              WHERE c.clan_id = @clan
+                AND c.inactive_reason IS NULL
+                AND (c.owner_id = @actor OR a.user_id IS NOT NULL)
+            )
             ON CONFLICT (clan_id) DO UPDATE
             SET welcome_enabled = EXCLUDED.welcome_enabled,
                 welcome_text = COALESCE(EXCLUDED.welcome_text, clan_settings.welcome_text),
@@ -86,6 +106,7 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
             RETURNING version;
             """, connection);
         command.Parameters.AddWithValue("clan", clanId);
+        command.Parameters.AddWithValue("actor", actorUserId);
         command.Parameters.AddWithValue("enabled", enabled);
         command.Parameters.Add(new NpgsqlParameter("text", NpgsqlDbType.Text)
         {
@@ -95,24 +116,34 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
         return version is long value ? value : 0;
     }
 
-    public async Task<long> SetWelcomeMessageAsync(long clanId, string text, CancellationToken cancellationToken)
+    public async Task<long> SetWelcomeMessageAsync(long clanId, long actorUserId, string text, CancellationToken cancellationToken)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
             INSERT INTO clan_settings(clan_id, welcome_text)
-            VALUES (@clan, @text)
+            SELECT @clan, @text
+            WHERE EXISTS (
+              SELECT 1
+              FROM clan_registry c
+              LEFT JOIN clan_admin a
+                ON a.clan_id = c.clan_id AND a.user_id = @actor
+              WHERE c.clan_id = @clan
+                AND c.inactive_reason IS NULL
+                AND (c.owner_id = @actor OR a.user_id IS NOT NULL)
+            )
             ON CONFLICT (clan_id) DO UPDATE
             SET welcome_text = EXCLUDED.welcome_text,
                 version = clan_settings.version + 1
             RETURNING version;
             """, connection);
         command.Parameters.AddWithValue("clan", clanId);
+        command.Parameters.AddWithValue("actor", actorUserId);
         command.Parameters.AddWithValue("text", text);
         var version = await command.ExecuteScalarAsync(cancellationToken);
         return version is long value ? value : 0;
     }
 
-    public async Task<long> RemoveWelcomeMessageAsync(long clanId, CancellationToken cancellationToken)
+    public async Task<long> RemoveWelcomeMessageAsync(long clanId, long actorUserId, CancellationToken cancellationToken)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
@@ -120,28 +151,49 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
             SET welcome_text = NULL,
                 version = version + 1
             WHERE clan_id = @clan
+              AND EXISTS (
+                SELECT 1
+                FROM clan_registry c
+                LEFT JOIN clan_admin a
+                  ON a.clan_id = c.clan_id AND a.user_id = @actor
+                WHERE c.clan_id = @clan
+                  AND c.inactive_reason IS NULL
+                  AND (c.owner_id = @actor OR a.user_id IS NOT NULL)
+              )
             RETURNING version;
             """, connection);
         command.Parameters.AddWithValue("clan", clanId);
+        command.Parameters.AddWithValue("actor", actorUserId);
         var version = await command.ExecuteScalarAsync(cancellationToken);
         return version is long value ? value : 0;
     }
 
     public async Task<long> SetWelcomeEmbedAsync(
         long clanId,
+        long actorUserId,
         WelcomeEmbedSettings embed,
         CancellationToken cancellationToken)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
             INSERT INTO clan_settings(clan_id, welcome_embed)
-            VALUES (@clan, @embed)
+            SELECT @clan, @embed
+            WHERE EXISTS (
+              SELECT 1
+              FROM clan_registry c
+              LEFT JOIN clan_admin a
+                ON a.clan_id = c.clan_id AND a.user_id = @actor
+              WHERE c.clan_id = @clan
+                AND c.inactive_reason IS NULL
+                AND (c.owner_id = @actor OR a.user_id IS NOT NULL)
+            )
             ON CONFLICT (clan_id) DO UPDATE
             SET welcome_embed = EXCLUDED.welcome_embed,
                 version = clan_settings.version + 1
             RETURNING version;
             """, connection);
         command.Parameters.AddWithValue("clan", clanId);
+        command.Parameters.AddWithValue("actor", actorUserId);
         command.Parameters.Add(new NpgsqlParameter("embed", NpgsqlDbType.Jsonb)
         {
             Value = JsonSerializer.Serialize(embed)
@@ -152,6 +204,7 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
 
     public async Task<long> SetWelcomeConfigurationAsync(
         long clanId,
+        long actorUserId,
         bool enabled,
         string? text,
         WelcomeEmbedSettings embed,
@@ -160,7 +213,16 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
             INSERT INTO clan_settings(clan_id, welcome_enabled, welcome_text, welcome_embed)
-            VALUES (@clan, @enabled, @text, @embed)
+            SELECT @clan, @enabled, @text, @embed
+            WHERE EXISTS (
+              SELECT 1
+              FROM clan_registry c
+              LEFT JOIN clan_admin a
+                ON a.clan_id = c.clan_id AND a.user_id = @actor
+              WHERE c.clan_id = @clan
+                AND c.inactive_reason IS NULL
+                AND (c.owner_id = @actor OR a.user_id IS NOT NULL)
+            )
             ON CONFLICT (clan_id) DO UPDATE
             SET welcome_enabled = EXCLUDED.welcome_enabled,
                 welcome_text = COALESCE(EXCLUDED.welcome_text, clan_settings.welcome_text),
@@ -169,6 +231,7 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
             RETURNING version;
             """, connection);
         command.Parameters.AddWithValue("clan", clanId);
+        command.Parameters.AddWithValue("actor", actorUserId);
         command.Parameters.AddWithValue("enabled", enabled);
         command.Parameters.Add(new NpgsqlParameter("text", NpgsqlDbType.Text)
         {
@@ -182,7 +245,7 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
         return version is long value ? value : 0;
     }
 
-    public async Task<long> RemoveWelcomeEmbedAsync(long clanId, CancellationToken cancellationToken)
+    public async Task<long> RemoveWelcomeEmbedAsync(long clanId, long actorUserId, CancellationToken cancellationToken)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
@@ -190,9 +253,19 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
             SET welcome_embed = NULL,
                 version = version + 1
             WHERE clan_id = @clan
+              AND EXISTS (
+                SELECT 1
+                FROM clan_registry c
+                LEFT JOIN clan_admin a
+                  ON a.clan_id = c.clan_id AND a.user_id = @actor
+                WHERE c.clan_id = @clan
+                  AND c.inactive_reason IS NULL
+                  AND (c.owner_id = @actor OR a.user_id IS NOT NULL)
+              )
             RETURNING version;
             """, connection);
         command.Parameters.AddWithValue("clan", clanId);
+        command.Parameters.AddWithValue("actor", actorUserId);
         var version = await command.ExecuteScalarAsync(cancellationToken);
         return version is long value ? value : 0;
     }
@@ -282,28 +355,45 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
         return (bool?)await command.ExecuteScalarAsync(cancellationToken) ?? true;
     }
 
-    public async Task SetRoleAutomationEnabledAsync(long clanId, bool enabled, CancellationToken cancellationToken)
+    public async Task<bool> SetRoleAutomationEnabledAsync(
+        long clanId,
+        long actorUserId,
+        bool enabled,
+        CancellationToken cancellationToken)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
             INSERT INTO clan_settings(clan_id, role_enabled)
-            VALUES (@clan, @enabled)
+            SELECT @clan, @enabled
+            WHERE EXISTS (
+              SELECT 1
+              FROM clan_registry c
+              LEFT JOIN clan_admin a
+                ON a.clan_id = c.clan_id AND a.user_id = @actor
+              WHERE c.clan_id = @clan
+                AND c.inactive_reason IS NULL
+                AND (c.owner_id = @actor OR a.user_id IS NOT NULL)
+            )
             ON CONFLICT (clan_id) DO UPDATE
             SET role_enabled = EXCLUDED.role_enabled,
-                version = clan_settings.version + 1;
+                version = clan_settings.version + 1
+            RETURNING clan_id;
             """, connection);
         command.Parameters.AddWithValue("clan", clanId);
+        command.Parameters.AddWithValue("actor", actorUserId);
         command.Parameters.AddWithValue("enabled", enabled);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        return await command.ExecuteScalarAsync(cancellationToken) is not null;
     }
 
-    public async Task SetRoleSelfAssignableAsync(
+    public async Task<bool> SetRoleSelfAssignableAsync(
         long clanId,
+        long actorUserId,
         long roleId,
         bool enabled,
         CancellationToken cancellationToken)
         => await SetRoleRuleAsync(
             clanId,
+            actorUserId,
             roleId,
             RoleRuleKind.SelfSelect,
             null,
@@ -346,16 +436,18 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
         return await ReadRoleRulesAsync(command, cancellationToken);
     }
 
-    public async Task SetRoleRuleAsync(
+    public async Task<bool> SetRoleRuleAsync(
         long clanId,
+        long actorUserId,
         long roleId,
         RoleRuleKind kind,
         string? conditionValue,
         CancellationToken cancellationToken)
-        => await SetRoleRuleAsync(clanId, roleId, kind, conditionValue, cancellationToken, true);
+        => await SetRoleRuleAsync(clanId, actorUserId, roleId, kind, conditionValue, cancellationToken, true);
 
-    private async Task SetRoleRuleAsync(
+    private async Task<bool> SetRoleRuleAsync(
         long clanId,
+        long actorUserId,
         long roleId,
         RoleRuleKind kind,
         string? conditionValue,
@@ -365,14 +457,25 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
             INSERT INTO role_rule(clan_id, role_id, rule_kind, enabled, condition_value)
-            VALUES (@clan, @role, @kind, @enabled, @condition)
+            SELECT @clan, @role, @kind, @enabled, @condition
+            WHERE EXISTS (
+              SELECT 1
+              FROM clan_registry c
+              LEFT JOIN clan_admin a
+                ON a.clan_id = c.clan_id AND a.user_id = @actor
+              WHERE c.clan_id = @clan
+                AND c.inactive_reason IS NULL
+                AND (c.owner_id = @actor OR a.user_id IS NOT NULL)
+            )
             ON CONFLICT (clan_id, role_id, rule_kind)
             DO UPDATE SET enabled = EXCLUDED.enabled,
                           condition_value = EXCLUDED.condition_value,
                           version = role_rule.version + 1,
-                          updated_at = now();
+                          updated_at = now()
+            RETURNING clan_id;
             """, connection);
         command.Parameters.AddWithValue("clan", clanId);
+        command.Parameters.AddWithValue("actor", actorUserId);
         command.Parameters.AddWithValue("role", roleId);
         command.Parameters.Add(new NpgsqlParameter("kind", NpgsqlDbType.Text)
         {
@@ -383,11 +486,12 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
         {
             Value = (object?)conditionValue ?? DBNull.Value
         });
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        return await command.ExecuteScalarAsync(cancellationToken) is not null;
     }
 
     public async Task<bool> RemoveRoleRuleAsync(
         long clanId,
+        long actorUserId,
         long roleId,
         RoleRuleKind kind,
         CancellationToken cancellationToken)
@@ -397,9 +501,19 @@ public sealed class PostgresAuthorizationRepository : IAuthorizationRepository
             DELETE FROM role_rule
             WHERE clan_id = @clan
               AND role_id = @role
-              AND rule_kind = @kind;
+              AND rule_kind = @kind
+              AND EXISTS (
+                SELECT 1
+                FROM clan_registry c
+                LEFT JOIN clan_admin a
+                  ON a.clan_id = c.clan_id AND a.user_id = @actor
+                WHERE c.clan_id = @clan
+                  AND c.inactive_reason IS NULL
+                  AND (c.owner_id = @actor OR a.user_id IS NOT NULL)
+              );
             """, connection);
         command.Parameters.AddWithValue("clan", clanId);
+        command.Parameters.AddWithValue("actor", actorUserId);
         command.Parameters.AddWithValue("role", roleId);
         command.Parameters.Add(new NpgsqlParameter("kind", NpgsqlDbType.Text)
         {

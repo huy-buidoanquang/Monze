@@ -19,7 +19,6 @@ public interface ISchedulingRepository
         long clanId,
         long channelId,
         long userId,
-        bool includeAll,
         int limit,
         CancellationToken cancellationToken);
 
@@ -27,7 +26,6 @@ public interface ISchedulingRepository
         long clanId,
         long channelId,
         long userId,
-        bool includeAll,
         long scheduleId,
         CancellationToken cancellationToken);
 

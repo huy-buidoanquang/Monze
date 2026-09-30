@@ -115,12 +115,10 @@ public sealed partial class MonzeApp
     {
         if (args.Count == 0)
         {
-            var includeAll = await _authorization.IsAdminAsync(clanId, userId, cancellationToken);
             var schedules = await _scheduling.ListMeetingSchedulesAsync(
                 clanId,
                 channelId,
                 userId,
-                includeAll,
                 20,
                 cancellationToken);
             return new CommandOutcome
@@ -139,12 +137,10 @@ public sealed partial class MonzeApp
 
         if (request.IsCancel)
         {
-            var includeAll = await _authorization.IsAdminAsync(clanId, userId, cancellationToken);
             var cancelled = await _scheduling.CancelMeetingScheduleAsync(
                 clanId,
                 channelId,
                 userId,
-                includeAll,
                 request.CancelScheduleId!.Value,
                 cancellationToken);
             return Say(cancelled ? MonzeMessages.MeetingScheduleCancelled : MonzeMessages.MeetingScheduleNotFound,
@@ -200,7 +196,7 @@ public sealed partial class MonzeApp
         return new CommandOutcome
         {
             Title = MonzeMessages.TitleMeeting,
-            Text = MonzeMessages.MeetingSuggested(voice.Label),
+            Text = MonzeMessages.MeetingAgentInstruction,
             Tone = MonzeTone.Ok,
             MeetingInvitation = new MeetingInvitation(voice.VoiceChannelId, voice.Label, SessionId: sessionId)
         };
@@ -277,7 +273,11 @@ public sealed partial class MonzeApp
             return Say(MonzeMessages.WelcomeAdminOnly, tone: MonzeTone.Error);
         }
 
-        var version = await _authorization.SetWelcomeAsync(clanId, enabled, text, cancellationToken);
+        var version = await _authorization.SetWelcomeAsync(clanId, userId, enabled, text, cancellationToken);
+        if (version == 0)
+        {
+            return Say(MonzeMessages.WelcomeAdminOnly, tone: MonzeTone.Error);
+        }
         try
         {
             await _readModelCache.InvalidateAsync(clanId, "welcome", "settings", version, cancellationToken);

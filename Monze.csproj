@@ -18,14 +18,19 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="Monze.Infrastructure\Monze.Infrastructure.csproj" />
-    <PackageReference Include="Mezon.Net.Sdk" Version="1.6.0" />
-    <PackageReference Include="Mezon.Net.Sdk.Caching.Redis" Version="1.6.0" />
-    <PackageReference Include="Mezon.Net.Sdk.Caching.Sqlite" Version="1.6.0" />
+    <PackageReference Include="Mezon.Net.Sdk" Version="1.6.1" />
+    <PackageReference Include="Mezon.Net.Sdk.Caching.Redis" Version="1.6.1" />
+    <PackageReference Include="Mezon.Net.Sdk.Caching.Sqlite" Version="1.6.1" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
     <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.53.3" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Monze.Tests" />
     <InternalsVisibleTo Include="Monze.Benchmarks" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="appsettings.Development.local.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 </Project>

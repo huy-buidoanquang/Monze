@@ -92,13 +92,13 @@
       },
       "Mezon.Net.Client": {
         "type": "Transitive",
-        "resolved": "1.6.0",
-        "contentHash": "5Jva/1wepxVRBEZEwgyU8H38luF+aAUF+C+6rCDflXsg6wFwtBH8QsqO6UD+wfMSpyvHc0azzcp2Y2ww0B9aDw==",
+        "resolved": "1.6.1",
+        "contentHash": "LUfpwwv7QO3+JZbGYMMn1ceUe7vhs1luAKtjupazPEeCXOyUHXCl6n0NbkM6zugfxuxFmeoJdADLHIQYAhKD+g==",
         "dependencies": {
           "Grpc.Core.Api": "2.76.0",
           "JetBrains.Annotations": "2025.2.0",
-          "Mezon.Net.Core": "1.6.0",
-          "Mezon.Net.Transport": "1.6.0",
+          "Mezon.Net.Core": "1.6.1",
+          "Mezon.Net.Transport": "1.6.1",
           "Microsoft.Extensions.Options.ConfigurationExtensions": "2.1.0",
           "Microsoft.Extensions.Options.DataAnnotations": "3.1.0",
           "Newtonsoft.Json": "13.0.4",
@@ -107,8 +107,8 @@
       },
       "Mezon.Net.Core": {
         "type": "Transitive",
-        "resolved": "1.6.0",
-        "contentHash": "NVsPzFazG5qdsl9N7l/KQWtTJ75rosJnZB1XF0KFZNXqf0XLHILLHhRWZBoxjaOCcRzcn1L0W0nrnd2JsldWBQ==",
+        "resolved": "1.6.1",
+        "contentHash": "jsagzyP7YsbjXcZMWzWjt+JuSh3QqwzgxZyb5szDS1rsXA8dAeCWoeYpfCP0TF78dshRdP+YCra3Pmm/c3OOYg==",
         "dependencies": {
           "Google.Api.CommonProtos": "2.17.0",
           "Google.Protobuf": "3.33.2",
@@ -119,8 +119,8 @@
       },
       "Mezon.Net.Mmn": {
         "type": "Transitive",
-        "resolved": "1.6.0",
-        "contentHash": "VKVLeEbyMEnuRfrsPMqk4CM/5vrygEkb4M3Gow50ATCYmFxRSH+6wyin4AGrECgGw+DJnNmJBQicP90+VgC9Hg==",
+        "resolved": "1.6.1",
+        "contentHash": "AslU2+NzpRlwYWEdanga+52wh81havjdLVc03iCxWiTvFNgFukxP7wXXj6N+8ZPfdjZL06hhm3L8SFZq0+gQbQ==",
         "dependencies": {
           "BouncyCastle.Cryptography": "2.6.2",
           "Google.Protobuf": "3.33.2",
@@ -130,20 +130,20 @@
       },
       "Mezon.Net.Sdk": {
         "type": "Transitive",
-        "resolved": "1.6.0",
-        "contentHash": "Ylt724H3hqW7XHBsc/Q+CZUUYQeeK/T3qUTlc+MqQ+fT23EPgcESRDdN3OVnAcxmCCOkwMnVzkcQAD1Tf7nRQg==",
+        "resolved": "1.6.1",
+        "contentHash": "U/IcRk5yJ0aDbeoBXbQ8X3TyNmduSJQMR4Ifo3NvOZneSZx6DuBYJmjkJn5HRP1GYbqltCn0+8gDmk1GYtuvsA==",
         "dependencies": {
-          "Mezon.Net.Client": "1.6.0",
-          "Mezon.Net.Mmn": "1.6.0",
+          "Mezon.Net.Client": "1.6.1",
+          "Mezon.Net.Mmn": "1.6.1",
           "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.0"
         }
       },
       "Mezon.Net.Sdk.Caching.Redis": {
         "type": "Transitive",
-        "resolved": "1.6.0",
-        "contentHash": "/4VhJSuoCdKUeALO+e8QDnRi0fEoQjmRJ5Wvv1gu+/x0UGO1ulOeXAZcLz9o0vfVlS4sMnQ33OotZacDhfd7hw==",
+        "resolved": "1.6.1",
+        "contentHash": "eB0GeoGAOX3rYF26Si9o61Pf2svoI+fxRu7rM8H0VOgY/FVuy/U0bZ2I3jVhMLWD0yatkQneeLwpkrmUu07n2Q==",
         "dependencies": {
-          "Mezon.Net.Sdk": "1.6.0",
+          "Mezon.Net.Sdk": "1.6.1",
           "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.0",
           "Microsoft.Extensions.Logging.Abstractions": "10.0.0",
           "StackExchange.Redis": "2.8.31"
@@ -151,18 +151,18 @@
       },
       "Mezon.Net.Sdk.Caching.Sqlite": {
         "type": "Transitive",
-        "resolved": "1.6.0",
-        "contentHash": "bQ7PCUfSMnmoIVuUttI+bqvcc+mkGN3reH2YbRdL36xrLMl/IEfSnh+/U0S4+u8ZfHcwitVIHVSetxlWQonPdg==",
+        "resolved": "1.6.1",
+        "contentHash": "PSkP9qNVAe27CE1H5A5bKwdLBy512emVwDvdsIx2lfwHw8/OYwvDNTW2Oe9g+PEVo5cMumQs/7U6s2cenI6lyw==",
         "dependencies": {
           "Microsoft.Data.Sqlite": "10.0.1"
         }
       },
       "Mezon.Net.Transport": {
         "type": "Transitive",
-        "resolved": "1.6.0",
-        "contentHash": "yooDGSOn+cSbCL9XOc5aIDPFGD6rAP/XBSOrdqpfROh4tSV5OWkKIOyCtu1hEjokvWHcx9k5+LD7hvItmDwYHA==",
+        "resolved": "1.6.1",
+        "contentHash": "vvz1uNE03HyRrQwa9kPPLf4lEC4bwC9EZTHp7ejH1c4K4EO3g2N/bno/BAGf+HTjJcEZU5UpuXTB0WjsRBJorw==",
         "dependencies": {
-          "Mezon.Net.Core": "1.6.0"
+          "Mezon.Net.Core": "1.6.1"
         }
       },
       "Microsoft.CodeAnalysis.Analyzers": {
@@ -507,9 +507,9 @@
       "monze.infrastructure": {
         "type": "Project",
         "dependencies": {
-          "Mezon.Net.Sdk": "[1.6.0, )",
-          "Mezon.Net.Sdk.Caching.Redis": "[1.6.0, )",
-          "Mezon.Net.Sdk.Caching.Sqlite": "[1.6.0, )",
+          "Mezon.Net.Sdk": "[1.6.1, )",
+          "Mezon.Net.Sdk.Caching.Redis": "[1.6.1, )",
+          "Mezon.Net.Sdk.Caching.Sqlite": "[1.6.1, )",
           "Microsoft.Extensions.Caching.Memory": "[10.0.0, )",
           "Microsoft.Extensions.Hosting.Abstractions": "[10.0.0, )",
           "Monze.Application": "[1.0.0, )",

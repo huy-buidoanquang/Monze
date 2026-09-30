@@ -9,6 +9,11 @@ public sealed partial class MonzeBot
 {
     private async Task HandleHelpPageAsync(IInteractionContext context, string page)
     {
+        if (!await EnsurePrivateInteractionAsync(context))
+        {
+            return;
+        }
+
         var isAdmin = await _authorization.IsAdminAsync(
             context.Channel.ClanId,
             context.User.Id,
@@ -17,7 +22,8 @@ public sealed partial class MonzeBot
             context.Channel.ClanId,
             context.User.Id,
             context.CancellationToken);
-        await context.UpdateMessageAsync(
+        await UpdatePrivateInteractionAsync(
+            context,
             MonzeMessageBuilder.HelpPage(
                 page,
                 _commandOptions,
@@ -26,14 +32,23 @@ public sealed partial class MonzeBot
                 isOwner));
     }
 
-    private Task HandleHelpCloseAsync(IInteractionContext context)
-        => context.UpdateMessageAsync(MonzeMessageBuilder.Card(
-            MonzeMessages.TitleHelp,
-            "Đã đóng hướng dẫn.",
-            MonzeTone.Info));
+    private async Task HandleHelpCloseAsync(IInteractionContext context)
+    {
+        if (!await EnsurePrivateInteractionAsync(context))
+        {
+            return;
+        }
+
+        await DeletePrivateInteractionAsync(context);
+    }
 
     private async Task HandleWelcomeSettingsAsync(IInteractionContext context)
     {
+        if (!await EnsurePrivateInteractionAsync(context))
+        {
+            return;
+        }
+
         if (!await EnsureWelcomeAdministratorAsync(context))
         {
             return;
@@ -49,7 +64,8 @@ public sealed partial class MonzeBot
             current = draft;
         }
 
-        await context.UpdateMessageAsync(
+        await UpdatePrivateInteractionAsync(
+            context,
             MonzeMessageBuilder.WelcomeSettings(current));
     }
 
@@ -57,6 +73,11 @@ public sealed partial class MonzeBot
         IInteractionContext context,
         WelcomeSetupSection section)
     {
+        if (!await EnsurePrivateInteractionAsync(context))
+        {
+            return;
+        }
+
         if (!await EnsureWelcomeAdministratorAsync(context))
         {
             return;
@@ -85,15 +106,20 @@ public sealed partial class MonzeBot
         var content = MonzeMessageBuilder.WelcomeSettings(current, section);
         if (context.Message is not null)
         {
-            await context.UpdateMessageAsync(content);
+            await UpdatePrivateInteractionAsync(context, content);
             return;
         }
 
-        await context.UpdateMessageAsync(content);
+        await UpdatePrivateInteractionAsync(context, content);
     }
 
     private async Task HandleWelcomePreviewAsync(IInteractionContext context)
     {
+        if (!await EnsurePrivateInteractionAsync(context))
+        {
+            return;
+        }
+
         if (!await EnsureWelcomeAdministratorAsync(context))
         {
             return;
@@ -101,7 +127,8 @@ public sealed partial class MonzeBot
 
         if (context.Interaction is not ButtonInteraction button)
         {
-            await context.UpdateMessageAsync(
+            await UpdatePrivateInteractionAsync(
+                context,
                 MonzeMessageBuilder.Card(
                     MonzeMessages.TitleWelcome,
                     MonzeMessages.WelcomeDraftInvalid,
@@ -136,18 +163,24 @@ public sealed partial class MonzeBot
             draft,
             context.CancellationToken,
             current.Text);
-        await context.UpdateMessageAsync(MonzeMessageBuilder.Card(outcome, _commandOptions));
+        await UpdatePrivateInteractionAsync(context, MonzeMessageBuilder.Card(outcome, _commandOptions));
     }
 
     private async Task HandleWelcomeCancelAsync(IInteractionContext context)
     {
+        if (!await EnsurePrivateInteractionAsync(context))
+        {
+            return;
+        }
+
         if (!await EnsureWelcomeAdministratorAsync(context))
         {
             return;
         }
 
         _welcomeSetupDrafts.Remove(GetWelcomeSetupDraftKey(context));
-        await context.UpdateMessageAsync(
+        await UpdatePrivateInteractionAsync(
+            context,
             MonzeMessageBuilder.Card(
                 new CommandOutcome
                 {
@@ -161,6 +194,11 @@ public sealed partial class MonzeBot
 
     private async Task HandleWelcomeSaveAsync(IInteractionContext context)
     {
+        if (!await EnsurePrivateInteractionAsync(context))
+        {
+            return;
+        }
+
         if (!await EnsureWelcomeAdministratorAsync(context))
         {
             return;
@@ -168,7 +206,8 @@ public sealed partial class MonzeBot
 
         if (context.Interaction is not ButtonInteraction button)
         {
-            await context.UpdateMessageAsync(
+            await UpdatePrivateInteractionAsync(
+                context,
                 MonzeMessageBuilder.Card(
                     MonzeMessages.TitleWelcome,
                     MonzeMessages.WelcomeDraftInvalid,
@@ -184,7 +223,8 @@ public sealed partial class MonzeBot
                 context.User.Id,
                 token,
                 context.CancellationToken);
-            await context.UpdateMessageAsync(
+            await UpdatePrivateInteractionAsync(
+                context,
                 MonzeMessageBuilder.Card(saveOutcome, _commandOptions));
             return;
         }
@@ -221,7 +261,7 @@ public sealed partial class MonzeBot
             _welcomeSetupDrafts.Remove(key);
         }
 
-        await context.UpdateMessageAsync(MonzeMessageBuilder.Card(outcome, _commandOptions));
+        await UpdatePrivateInteractionAsync(context, MonzeMessageBuilder.Card(outcome, _commandOptions));
     }
 
     private static WelcomeSetupDraftKey GetWelcomeSetupDraftKey(IInteractionContext context)
@@ -237,7 +277,8 @@ public sealed partial class MonzeBot
             return true;
         }
 
-        await context.UpdateMessageAsync(
+        await UpdatePrivateInteractionAsync(
+            context,
             MonzeMessageBuilder.Card(
                 MonzeMessages.TitleWelcome,
                 MonzeMessages.WelcomeAdminOnly,

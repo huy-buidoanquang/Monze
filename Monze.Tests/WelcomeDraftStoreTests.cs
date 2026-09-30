@@ -50,4 +50,19 @@ public sealed class WelcomeDraftStoreTests
 
         store.Complete(retried);
     }
+
+    [Fact]
+    public void Create_rejects_entries_beyond_the_memory_bound()
+    {
+        var store = new MemoryWelcomeDraftStore();
+        var now = DateTimeOffset.UtcNow;
+
+        for (var i = 0; i < 4_096; i++)
+        {
+            store.Create(i + 1, 20, true, new WelcomeEmbedSettings(), now);
+        }
+
+        Assert.Throws<InvalidOperationException>(() =>
+            store.Create(5_000, 20, true, new WelcomeEmbedSettings(), now));
+    }
 }

@@ -8,6 +8,7 @@ public sealed class MemoryWelcomeSetupDraftStore : IWelcomeSetupDraftStore
     private const int MaxEntries = 4_096;
     private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(15);
 
+    private readonly object _capacityGate = new();
     private readonly ConcurrentDictionary<WelcomeSetupDraftKey, WelcomeSetupDraftState> _drafts = new();
 
     public bool TryGet(WelcomeSetupDraftKey key, DateTimeOffset now, out WelcomeSettings settings)
@@ -25,13 +26,16 @@ public sealed class MemoryWelcomeSetupDraftStore : IWelcomeSetupDraftStore
 
     public void Set(WelcomeSetupDraftKey key, WelcomeSettings settings, DateTimeOffset now)
     {
-        CleanupExpired(now);
-        if (!_drafts.ContainsKey(key) && _drafts.Count >= MaxEntries)
+        lock (_capacityGate)
         {
-            return;
-        }
+            CleanupExpired(now);
+            if (!_drafts.ContainsKey(key) && _drafts.Count >= MaxEntries)
+            {
+                return;
+            }
 
-        _drafts[key] = new WelcomeSetupDraftState(settings, now.Add(Lifetime));
+            _drafts[key] = new WelcomeSetupDraftState(settings, now.Add(Lifetime));
+        }
     }
 
     public void Remove(WelcomeSetupDraftKey key)

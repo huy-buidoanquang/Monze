@@ -19,6 +19,17 @@ public sealed partial class MonzeBot
     private Task EnqueueMessageAsync(ChannelMessageEventData message)
     {
         var response = (ChannelMessageResponse)message;
+        if (response.Code is 12 or 14 or 15)
+        {
+            _logger.LogDebug(
+                "Ephemeral message event received. Clan={ClanId}, Channel={ChannelId}, Message={MessageId}, Code={Code}, Sender={SenderId}.",
+                response.ClanId,
+                response.ChannelId,
+                response.MessageId,
+                response.Code,
+                response.SenderId);
+        }
+
         if (_messageIngress.TryWrite(response.ClanId, message))
         {
             Interlocked.Increment(ref _messageIngressDepth);
@@ -454,6 +465,40 @@ public sealed partial class MonzeBot
         if (message.ClanId == 0 || message.ChannelId == 0)
         {
             return;
+        }
+
+        if (message.SenderId > 0)
+        {
+            var profileKey = $"monze:profile-sync:{message.ClanId}:{message.SenderId}";
+            if (!_policyCache.TryGetValue(profileKey, out UserProfileSyncState? state)
+                || state is null
+                || !state.Matches(
+                    message.ClanNick,
+                    message.DisplayName,
+                    message.Username,
+                    message.Avatar))
+            {
+                await _userProfiles.UpsertAsync(
+                    message.ClanId,
+                    message.SenderId,
+                    message.ClanNick,
+                    message.DisplayName,
+                    message.Username,
+                    message.Avatar,
+                    cancellationToken);
+                _policyCache.Set(
+                    profileKey,
+                    new UserProfileSyncState(
+                        message.ClanNick,
+                        message.DisplayName,
+                        message.Username,
+                        message.Avatar),
+                    new MemoryCacheEntryOptions
+                    {
+                        AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5),
+                        Size = 1
+                    });
+            }
         }
 
         var key = new ChannelPolicyKey(message.ClanId, message.ChannelId);

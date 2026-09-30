@@ -32,6 +32,7 @@ public sealed partial class MonzeBot : BackgroundService
     private readonly ISchedulingRepository _scheduling;
     private readonly IOutboxRepository _outbox;
     private readonly IMessageHistoryRepository _messageHistory;
+    private readonly IUserProfileRepository _userProfiles;
     private readonly ICommandInboxRepository _commandInbox;
     private readonly IWelcomeSetupDraftStore _welcomeSetupDrafts;
     private readonly ITranscriptClient _transcript;
@@ -69,6 +70,7 @@ public sealed partial class MonzeBot : BackgroundService
         ISchedulingRepository scheduling,
         IOutboxRepository outbox,
         IMessageHistoryRepository messageHistory,
+        IUserProfileRepository userProfiles,
         ICommandInboxRepository commandInbox,
         IWelcomeSetupDraftStore welcomeSetupDrafts,
         ITranscriptClient transcript,
@@ -88,6 +90,7 @@ public sealed partial class MonzeBot : BackgroundService
         _scheduling = scheduling;
         _outbox = outbox;
         _messageHistory = messageHistory;
+        _userProfiles = userProfiles;
         _commandInbox = commandInbox;
         _welcomeSetupDrafts = welcomeSetupDrafts;
         _transcript = transcript;
@@ -180,7 +183,7 @@ public sealed partial class MonzeBot : BackgroundService
             _configuration.GetValue("Mezon:UseSsl", true))
         {
             TransportType = ResolveTransportType(_configuration["Mezon:Transport"]),
-            AgentEventUrl = _configuration["Mezon:AgentEventUrl"] ?? string.Empty,
+            AgentEventUrl = _configuration["Mezon:AgentBaseUrl"] ?? string.Empty,
             MaxTransportRequestsPerSecond = Math.Clamp(
                 _configuration.GetValue("Mezon:RateLimit:RequestsPerSecond", 60),
                 1,
@@ -219,79 +222,106 @@ public sealed partial class MonzeBot : BackgroundService
         client.UseCommands(commands);
 
         var interactions = new InteractionRouter();
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
             MonzeButtonId.HelpMeeting,
             ctx => HandleHelpPageAsync(ctx, "meeting"));
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
             MonzeButtonId.HelpSummary,
             ctx => HandleHelpPageAsync(ctx, "summary"));
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
             MonzeButtonId.HelpWelcome,
             ctx => HandleHelpPageAsync(ctx, "welcome"));
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
             MonzeButtonId.HelpRole,
             ctx => HandleHelpPageAsync(ctx, "role"));
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
             MonzeButtonId.HelpAi,
             ctx => HandleHelpPageAsync(ctx, "ai"));
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
             MonzeButtonId.HelpSetup,
             ctx => HandleHelpPageAsync(ctx, "setup"));
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
             MonzeButtonId.HelpClose,
             HandleHelpCloseAsync);
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
             MeetingButtonId.Refresh,
             HandleMeetingListAsync);
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
             MeetingButtonId.StartNow,
             HandleMeetingNowInteractionAsync);
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
             MeetingButtonId.Schedule,
             HandleMeetingScheduleFormAsync);
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
             MeetingButtonId.ScheduleSubmit,
             HandleMeetingScheduleSubmitAsync);
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
             MeetingButtonId.ScheduleCancel,
             HandleMeetingScheduleCancelAsync);
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
             MeetingButtonId.Help,
             ctx => HandleHelpPageAsync(ctx, "meeting"));
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
             MeetingButtonId.CancelPrefix + "*",
             HandleMeetingCancelInteractionAsync);
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
             MonzeButtonId.WelcomeHelp,
             HandleWelcomeSettingsAsync);
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
                 MonzeButtonId.WelcomeSettings,
                 HandleWelcomeSettingsAsync);
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
                 MonzeButtonId.WelcomeGeneral,
                 ctx => HandleWelcomeSectionAsync(ctx, WelcomeSetupSection.General));
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
                 MonzeButtonId.WelcomeImages,
                 ctx => HandleWelcomeSectionAsync(ctx, WelcomeSetupSection.Images));
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
                 MonzeButtonId.WelcomeAuthorSection,
                 ctx => HandleWelcomeSectionAsync(ctx, WelcomeSetupSection.Author));
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
                 MonzeButtonId.WelcomeAdvanced,
                 ctx => HandleWelcomeSectionAsync(ctx, WelcomeSetupSection.Advanced));
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
                 MonzeButtonId.WelcomePreview,
                 HandleWelcomePreviewAsync);
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
                 MonzeButtonId.WelcomeSave,
                 HandleWelcomeSaveAsync);
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
                 MonzeButtonId.WelcomeSavePrefix + "*",
                 HandleWelcomeSaveAsync);
-        interactions.OnButton(
+        RegisterPrivateButton(
+            interactions,
                 MonzeButtonId.WelcomeCancel,
                 HandleWelcomeCancelAsync);
-        client.UseInteractions(interactions);
+        client.MessageButtonClicked += evt =>
+            DispatchButtonInteractionAsync(client, interactions, evt);
+        client.DropdownBoxSelected += evt =>
+            DispatchSelectInteractionAsync(client, interactions, evt);
 
         client.AgentSessionStarted += evt => EnqueueAgentAsync(evt, AgentEventKind.Started);
         client.AgentSessionEnded += evt => EnqueueAgentAsync(evt, AgentEventKind.Ended);
@@ -372,6 +402,32 @@ public sealed partial class MonzeBot : BackgroundService
             {
             }
         }
+    }
+
+    private void RegisterPrivateButton(
+        InteractionRouter router,
+        string customId,
+        InteractionHandler handler)
+    {
+        // SDK 1.6.1's live ephemeral ACK has no usable message id and its
+        // published interaction context is client-supplied. The direct SDK
+        // event bridge records a short-lived transport marker; handlers still
+        // require the per-user private binding in EnsurePrivateInteractionAsync.
+        router.OnButton(customId, context => InvokePrivateButtonAsync(customId, handler, context));
+    }
+
+    private async Task InvokePrivateButtonAsync(
+        string customId,
+        InteractionHandler handler,
+        IInteractionContext context)
+    {
+        _logger.LogDebug(
+            "Private button route invoked. Channel={ChannelId}, Message={MessageId}, User={UserId}, CustomId={CustomId}.",
+            context.Channel.Id,
+            context.Interaction.MessageId,
+            context.User.Id,
+            customId);
+        await handler(context).ConfigureAwait(false);
     }
 
     private static TransportType ResolveTransportType(string? configured)

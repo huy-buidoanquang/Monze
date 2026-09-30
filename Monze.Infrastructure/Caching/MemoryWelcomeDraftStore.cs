@@ -9,6 +9,7 @@ public sealed class MemoryWelcomeDraftStore : IWelcomeDraftStore
     private const int MaxEntries = 4_096;
     private static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(10);
 
+    private readonly object _capacityGate = new();
     private readonly ConcurrentDictionary<string, WelcomeDraftTicket> _tickets = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, byte> _claimed = new(StringComparer.Ordinal);
 
@@ -20,30 +21,33 @@ public sealed class MemoryWelcomeDraftStore : IWelcomeDraftStore
         DateTimeOffset now,
         string? text = null)
     {
-        CleanupExpired(now);
-        if (_tickets.Count >= MaxEntries)
+        lock (_capacityGate)
         {
-            throw new InvalidOperationException("Welcome draft capacity is temporarily full.");
+            CleanupExpired(now);
+            if (_tickets.Count >= MaxEntries)
+            {
+                throw new InvalidOperationException("Welcome draft capacity is temporarily full.");
+            }
+
+            Span<byte> bytes = stackalloc byte[16];
+            RandomNumberGenerator.Fill(bytes);
+            var token = Convert.ToHexString(bytes);
+            var ticket = new WelcomeDraftTicket(
+                token,
+                clanId,
+                channelId,
+                enabled,
+                draft,
+                now.Add(Lifetime),
+                text);
+
+            if (!_tickets.TryAdd(token, ticket))
+            {
+                throw new InvalidOperationException("Could not create a unique welcome draft token.");
+            }
+
+            return ticket;
         }
-
-        Span<byte> bytes = stackalloc byte[16];
-        RandomNumberGenerator.Fill(bytes);
-        var token = Convert.ToHexString(bytes);
-        var ticket = new WelcomeDraftTicket(
-            token,
-            clanId,
-            channelId,
-            enabled,
-            draft,
-            now.Add(Lifetime),
-            text);
-
-        if (!_tickets.TryAdd(token, ticket))
-        {
-            throw new InvalidOperationException("Could not create a unique welcome draft token.");
-        }
-
-        return ticket;
     }
 
     public bool TryClaim(

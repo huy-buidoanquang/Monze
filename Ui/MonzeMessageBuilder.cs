@@ -65,7 +65,9 @@ public static class MonzeMessageBuilder
         return Build(outcome.Title, MonzeEmbedColors.For(outcome.Tone), fields, components: null);
     }
 
-    public static MessageContent MeetingInvitation(MeetingInvitation invitation)
+    public static MessageContent MeetingInvitation(
+        MeetingInvitation invitation,
+        string? instruction = null)
     {
         var label = string.IsNullOrWhiteSpace(invitation.VoiceChannelLabel)
             ? "phòng voice"
@@ -77,15 +79,23 @@ public static class MonzeMessageBuilder
             .AddHashtag(
                 invitation.VoiceChannelId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 prefix.Length,
-                prefix.Length + label.Length + 1);
+                prefix.Length + label.Length);
 
-        if (!string.IsNullOrWhiteSpace(invitation.ConversationTitle))
+        if (!string.IsNullOrWhiteSpace(instruction)
+            || !string.IsNullOrWhiteSpace(invitation.ConversationTitle))
         {
-            builder.AddEmbed(
-                new MessageEmbedBuilder()
-                    .SetTitle("Cuộc họp")
-                    .AddField("Chủ đề", invitation.ConversationTitle.Trim())
-                    .Build());
+            var embedTitle = string.IsNullOrWhiteSpace(invitation.ConversationTitle)
+                ? "Cuộc hội thoại"
+                : $"Cuộc hội thoại được lên lịch: {invitation.ConversationTitle!.Trim()}";
+            var embed = new MessageEmbedBuilder()
+                .SetTitle(embedTitle)
+                .SetColor(MonzeEmbedColors.For(MonzeTone.Info));
+            if (!string.IsNullOrWhiteSpace(instruction))
+            {
+                embed.AddField(string.Empty, instruction.Trim());
+            }
+
+            builder.AddEmbed(embed.Build());
         }
 
         return builder.Build();
@@ -125,6 +135,23 @@ public static class MonzeMessageBuilder
                 .SetColor(MonzeEmbedColors.For(MonzeTone.Info))
                 .AddField(string.Empty, string.IsNullOrWhiteSpace(summary) ? MonzeMessages.NoSummary : summary)
                 .Build())
+            .Build();
+    }
+
+    public static MessageContent Avatar(MonzeAvatarTarget target)
+    {
+        var embed = new MessageEmbedBuilder()
+            .SetTitle("Avatar")
+            .SetColor(MonzeEmbedColors.For(MonzeTone.Info))
+            .AddField("Người dùng", target.Label);
+
+        if (!string.IsNullOrWhiteSpace(target.AvatarUrl))
+        {
+            embed.SetImage(target.AvatarUrl);
+        }
+
+        return new MessageContentBuilder()
+            .AddEmbed(embed.Build())
             .Build();
     }
 

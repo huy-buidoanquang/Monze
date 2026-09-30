@@ -97,6 +97,7 @@ internal static class Program
         builder.Services.AddSingleton<IAiUsageRepository, PostgresAiUsageRepository>();
         builder.Services.AddSingleton<IMessageHistoryRepository, PostgresMessageHistoryRepository>();
         builder.Services.AddSingleton<ICommandInboxRepository, PostgresCommandInboxRepository>();
+        builder.Services.AddSingleton<IUserProfileRepository, PostgresUserProfileRepository>();
         builder.Services.AddSingleton(sp => new MonzeApp(
             sp.GetRequiredService<IAuthorizationRepository>(),
             sp.GetRequiredService<IMeetingRepository>(),
@@ -143,7 +144,7 @@ internal static class Program
 
         builder.Services.AddSingleton<ITranscriptClient>(sp =>
         {
-            var baseUrl = sp.GetRequiredService<IConfiguration>()["Monze:Stt:BaseUrl"];
+            var baseUrl = sp.GetRequiredService<IConfiguration>()["Mezon:AgentBaseUrl"];
             if (string.IsNullOrWhiteSpace(baseUrl))
             {
                 return new DisabledTranscriptClient();

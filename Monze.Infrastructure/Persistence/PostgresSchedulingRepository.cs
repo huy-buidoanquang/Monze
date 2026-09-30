@@ -46,7 +46,6 @@ public sealed class PostgresSchedulingRepository : ISchedulingRepository
         long clanId,
         long channelId,
         long userId,
-        bool includeAll,
         int limit,
         CancellationToken cancellationToken)
     {
@@ -58,14 +57,24 @@ public sealed class PostgresSchedulingRepository : ISchedulingRepository
             WHERE clan_id = @clan
               AND channel_id = @channel
               AND status IN ('active', 'running')
-              AND (@all OR requester_id = @user)
+              AND (
+                requester_id = @user
+                OR EXISTS (
+                  SELECT 1
+                  FROM clan_registry c
+                  LEFT JOIN clan_admin a
+                    ON a.clan_id = c.clan_id AND a.user_id = @user
+                  WHERE c.clan_id = @clan
+                    AND c.inactive_reason IS NULL
+                    AND (c.owner_id = @user OR a.user_id IS NOT NULL)
+                )
+              )
             ORDER BY next_run_at, id
             LIMIT @limit;
             """, connection);
         command.Parameters.AddWithValue("clan", clanId);
         command.Parameters.AddWithValue("channel", channelId);
         command.Parameters.AddWithValue("user", userId);
-        command.Parameters.AddWithValue("all", includeAll);
         command.Parameters.AddWithValue("limit", Math.Clamp(limit, 1, 50));
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -89,7 +98,6 @@ public sealed class PostgresSchedulingRepository : ISchedulingRepository
         long clanId,
         long channelId,
         long userId,
-        bool includeAll,
         long scheduleId,
         CancellationToken cancellationToken)
     {
@@ -102,13 +110,23 @@ public sealed class PostgresSchedulingRepository : ISchedulingRepository
               AND clan_id = @clan
               AND channel_id = @channel
               AND status IN ('active', 'running')
-              AND (@all OR requester_id = @user);
+              AND (
+                requester_id = @user
+                OR EXISTS (
+                  SELECT 1
+                  FROM clan_registry c
+                  LEFT JOIN clan_admin a
+                    ON a.clan_id = c.clan_id AND a.user_id = @user
+                  WHERE c.clan_id = @clan
+                    AND c.inactive_reason IS NULL
+                    AND (c.owner_id = @user OR a.user_id IS NOT NULL)
+                )
+              );
             """, connection);
         command.Parameters.AddWithValue("id", scheduleId);
         command.Parameters.AddWithValue("clan", clanId);
         command.Parameters.AddWithValue("channel", channelId);
         command.Parameters.AddWithValue("user", userId);
-        command.Parameters.AddWithValue("all", includeAll);
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 

@@ -14,6 +14,9 @@ public static class MonzeCommandNames
     public const string Composer = "composer";
     public const string Simplify = "simplify";
     public const string Role = "role";
+    public const string Avatar = "avatar";
+    public const string AvatarAliasAva = "ava";
+    public const string AvatarAliasAvt = "avt";
     public const string Unknown = "unknown";
 
     public static IReadOnlyList<string> DirectModules { get; } =
@@ -21,7 +24,10 @@ public static class MonzeCommandNames
         Setup,
         Welcome,
         Ai,
-        Role
+        Role,
+        Avatar,
+        AvatarAliasAva,
+        AvatarAliasAvt
     ];
 
     public static string Normalize(string value)
@@ -34,6 +40,9 @@ public static class MonzeCommandNames
         if (value.Equals(Composer, StringComparison.OrdinalIgnoreCase)) return Composer;
         if (value.Equals(Simplify, StringComparison.OrdinalIgnoreCase)) return Simplify;
         if (value.Equals(Role, StringComparison.OrdinalIgnoreCase)) return Role;
+        if (value.Equals(Avatar, StringComparison.OrdinalIgnoreCase)
+            || value.Equals(AvatarAliasAva, StringComparison.OrdinalIgnoreCase)
+            || value.Equals(AvatarAliasAvt, StringComparison.OrdinalIgnoreCase)) return Avatar;
         if (value.Equals(Help, StringComparison.OrdinalIgnoreCase)) return Help;
         if (value.Equals(Meeting, StringComparison.OrdinalIgnoreCase)) return Meeting;
         if (value.Equals(Summary, StringComparison.OrdinalIgnoreCase)) return Summary;

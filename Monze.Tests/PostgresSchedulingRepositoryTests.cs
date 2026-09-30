@@ -28,6 +28,17 @@ public sealed class PostgresSchedulingRepositoryTests
 
         await using var dataSource = NpgsqlDataSource.Create(connectionString!);
         var repository = new PostgresSchedulingRepository(dataSource);
+        long ownerId;
+        await using (var ownerConnection = await dataSource.OpenConnectionAsync())
+        await using (var ownerCommand = new NpgsqlCommand(
+            "SELECT owner_id FROM clan_registry WHERE clan_id = @clan AND inactive_reason IS NULL;",
+            ownerConnection))
+        {
+            ownerCommand.Parameters.AddWithValue("clan", clanId);
+            ownerId = (long)(await ownerCommand.ExecuteScalarAsync() ?? 0L);
+        }
+
+        Assert.True(ownerId > 0);
         var scheduleId = await repository.CreateMeetingScheduleAsync(
             clanId,
             channelId,
@@ -45,8 +56,7 @@ public sealed class PostgresSchedulingRepositoryTests
                 clanId,
                 channelId,
                 requesterId,
-                includeAll: false,
-                limit: 20,
+                20,
                 CancellationToken.None);
             Assert.Contains(own, item =>
                 item.Id == scheduleId
@@ -57,22 +67,35 @@ public sealed class PostgresSchedulingRepositoryTests
                 clanId,
                 channelId,
                 otherUserId,
-                includeAll: false,
-                limit: 20,
+                20,
                 CancellationToken.None);
             Assert.DoesNotContain(other, item => item.Id == scheduleId);
             Assert.False(await repository.CancelMeetingScheduleAsync(
                 clanId,
                 channelId,
                 otherUserId,
-                includeAll: false,
                 scheduleId,
                 CancellationToken.None));
+
+            var ownerSchedules = await repository.ListMeetingSchedulesAsync(
+                clanId,
+                channelId,
+                ownerId,
+                20,
+                CancellationToken.None);
+            Assert.Contains(ownerSchedules, item => item.Id == scheduleId);
+
             Assert.True(await repository.CancelMeetingScheduleAsync(
                 clanId,
                 channelId,
+                ownerId,
+                scheduleId,
+                CancellationToken.None));
+
+            Assert.False(await repository.CancelMeetingScheduleAsync(
+                clanId,
+                channelId,
                 requesterId,
-                includeAll: false,
                 scheduleId,
                 CancellationToken.None));
         }

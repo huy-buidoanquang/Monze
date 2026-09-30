@@ -62,6 +62,9 @@ public sealed class MonzeCommandRateLimiter
         if (command.Equals(MonzeCommandNames.Setup, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Setup;
         if (command.Equals(MonzeCommandNames.Welcome, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Welcome;
         if (command.Equals(MonzeCommandNames.Role, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Role;
+        if (command.Equals(MonzeCommandNames.Avatar, StringComparison.OrdinalIgnoreCase)
+            || command.Equals(MonzeCommandNames.AvatarAliasAva, StringComparison.OrdinalIgnoreCase)
+            || command.Equals(MonzeCommandNames.AvatarAliasAvt, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Avatar;
         if (command.Equals(MonzeCommandNames.Monze, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Monze;
         if (command.Equals(MonzeCommandNames.Help, StringComparison.OrdinalIgnoreCase)) return MonzeCommandNames.Help;
         return MonzeCommandNames.Unknown;

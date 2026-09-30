@@ -146,10 +146,24 @@ public sealed partial class MonzeBot
                 content,
                 mentionEveryone: item.MentionEveryone,
                 mentions: item.MentionEveryone ? MonzeMentionMetadata.Here : null);
+            var ackMessageId = TryReadMessageId(ack);
+            if (ackMessageId <= 0)
+            {
+                MonzeMetrics.OutboxUncertain.Add(1);
+                await TryCompleteOutboxAsync(
+                    item.Id,
+                    item.LeaseToken,
+                    null,
+                    true,
+                    cancellationToken,
+                    "delivery-uncertain");
+                return;
+            }
+
             await TryCompleteOutboxAsync(
                 item.Id,
                 item.LeaseToken,
-                ack.MessageId,
+                ackMessageId,
                 false,
                 cancellationToken,
                 null);
@@ -158,7 +172,7 @@ public sealed partial class MonzeBot
                 await _meeting.SetSessionNotificationMessageAsync(
                     sessionId,
                     item.ChannelId,
-                    ack.MessageId,
+                    ackMessageId,
                     cancellationToken);
             }
             MonzeMetrics.OutboxDelivered.Add(1);

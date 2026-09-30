@@ -56,7 +56,7 @@ public sealed partial class MonzeBot
                     context.Author.Id,
                     new CommandArguments(new[] { MonzeCommandNames.Help, MonzeCommandNames.Meeting }),
                     context.CancellationToken);
-                await context.ReplyAsync(MonzeMessageBuilder.Card(help, _commandOptions));
+                await ReplyCommandAsync(context, MonzeMessageBuilder.Card(help, _commandOptions));
                 return;
             }
 
@@ -71,24 +71,30 @@ public sealed partial class MonzeBot
             if (outcome.MeetingInvitation is { } invitation)
             {
                 var ack = await context.Channel.SendAsync(
-                    MonzeMessageBuilder.MeetingInvitation(invitation),
+                    MonzeMessageBuilder.MeetingInvitation(invitation, outcome.Text),
                     mentionEveryone: true,
                     mentions: MonzeMentionMetadata.Here);
-                invitationMessageId = ack.MessageId;
+                var ackMessageId = TryReadMessageId(ack);
+                if (ackMessageId > 0)
+                {
+                    invitationMessageId = ackMessageId;
+                }
                 _logger.LogInformation(
                     "Meeting invitation delivered to text channel {TextChannelId} for voice channel {VoiceChannelId} ({VoiceChannelLabel}); MessageId={MessageId}.",
                     context.Channel.Id,
                     invitation.VoiceChannelId,
                     invitation.VoiceChannelLabel,
-                    ack.MessageId);
+                    ackMessageId);
             }
-            var response = await context.ReplyAsync(MonzeMessageBuilder.Card(outcome, _commandOptions));
+            var response = outcome.MeetingInvitation is null
+                ? await ReplyCommandAsync(context, MonzeMessageBuilder.Card(outcome, _commandOptions))
+                : 0;
             if (outcome.MeetingInvitation?.SessionId is long sessionId)
             {
                 await _meeting.SetSessionNotificationMessageAsync(
                     sessionId,
                     context.Channel.Id,
-                    invitationMessageId ?? response.MessageId,
+                    invitationMessageId ?? response,
                     context.CancellationToken);
             }
         }
@@ -148,7 +154,7 @@ public sealed partial class MonzeBot
                     context.Author.Id,
                     new CommandArguments(new[] { MonzeCommandNames.Help, MonzeCommandNames.Summary }),
                     context.CancellationToken);
-                await context.ReplyAsync(MonzeMessageBuilder.Card(help, _commandOptions));
+                await ReplyCommandAsync(context, MonzeMessageBuilder.Card(help, _commandOptions));
                 return;
             }
 
@@ -402,8 +408,10 @@ public sealed partial class MonzeBot
                     voice.VoiceChannelId,
                     DateTimeOffset.UtcNow.AddMinutes(20),
                     next,
-                    $"Đã gửi lời mời cuộc họp \"{schedule.Name}\" vào phòng {voice.Label}.",
-                    MonzeMessageBuilder.MeetingInvitation(invitation).ToJson(),
+                    MonzeMessages.MeetingAgentInstruction,
+                    MonzeMessageBuilder.MeetingInvitation(
+                        invitation,
+                        MonzeMessages.MeetingAgentInstruction).ToJson(),
                     mentionEveryone: true,
                     cancellationToken);
                 if (!committed)

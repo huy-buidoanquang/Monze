@@ -1,4 +1,5 @@
 using Monze.Application;
+using Monze.Application.Commands;
 using Monze.Domain;
 using Monze.Ui;
 using System.Text.Json;
@@ -76,6 +77,52 @@ public sealed class MeetingUiTests
             root.GetProperty("t").GetString());
         Assert.Equal("42", root.GetProperty("hg")[0].GetProperty("channelId").GetString());
         Assert.Equal(1, root.GetProperty("embed").GetArrayLength());
+    }
+
+    [Fact]
+    public void Meeting_invitation_combines_agent_instruction_and_scheduled_title()
+    {
+        var content = MonzeMessageBuilder.MeetingInvitation(
+            new MeetingInvitation(42, "voice-room", "Sprint Review"),
+            MonzeMessages.MeetingAgentInstruction);
+        var root = JsonDocument.Parse(content.RawJson).RootElement;
+
+        Assert.Equal(
+            "@here Mọi người tham gia phòng voice-room để bắt đầu cuộc hội thoại.",
+            root.GetProperty("t").GetString());
+        Assert.Equal(
+            "Cuộc hội thoại được lên lịch: Sprint Review",
+            root.GetProperty("embed")[0].GetProperty("title").GetString());
+        Assert.Equal(
+            MonzeMessages.MeetingAgentInstruction,
+            root.GetProperty("embed")[0].GetProperty("fields")[0].GetProperty("value").GetString());
+        Assert.Equal(1, root.GetProperty("hg").GetArrayLength());
+        Assert.Equal(31, root.GetProperty("hg")[0].GetProperty("s").GetInt32());
+        Assert.Equal(41, root.GetProperty("hg")[0].GetProperty("e").GetInt32());
+        Assert.True(
+            MonzeEmbedColors.IsInformational(root.GetProperty("embed")[0].GetProperty("color").GetString()!));
+    }
+
+    [Fact]
+    public void Immediate_meeting_keeps_agent_instruction_inside_embed()
+    {
+        var content = MonzeMessageBuilder.MeetingInvitation(
+            new MeetingInvitation(42, "voice-room"),
+            MonzeMessages.MeetingAgentInstruction);
+        var root = JsonDocument.Parse(content.RawJson).RootElement;
+
+        Assert.Equal(
+            "@here Mọi người tham gia phòng voice-room để bắt đầu cuộc hội thoại.",
+            root.GetProperty("t").GetString());
+        Assert.Equal("Cuộc hội thoại", root.GetProperty("embed")[0].GetProperty("title").GetString());
+        Assert.Equal(
+            MonzeMessages.MeetingAgentInstruction,
+            root.GetProperty("embed")[0].GetProperty("fields")[0].GetProperty("value").GetString());
+        Assert.Equal(1, root.GetProperty("hg").GetArrayLength());
+        Assert.Equal(31, root.GetProperty("hg")[0].GetProperty("s").GetInt32());
+        Assert.Equal(41, root.GetProperty("hg")[0].GetProperty("e").GetInt32());
+        Assert.True(
+            MonzeEmbedColors.IsInformational(root.GetProperty("embed")[0].GetProperty("color").GetString()!));
     }
 
     [Fact]

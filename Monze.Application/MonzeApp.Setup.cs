@@ -42,6 +42,7 @@ public sealed partial class MonzeApp
             var enabled = rest[1].Equals(MonzeCommandActions.Add, StringComparison.OrdinalIgnoreCase);
             var changed = await _authorization.SetDelegateAsync(
                 clanId,
+                userId,
                 targetUserId.Value,
                 enabled,
                 cancellationToken);
@@ -313,10 +314,15 @@ public sealed partial class MonzeApp
         var normalized = NormalizeWelcomeEmbed(draft);
         var version = await _authorization.SetWelcomeConfigurationAsync(
             clanId,
+            userId,
             enabled,
             welcomeText,
             normalized,
             cancellationToken);
+        if (version == 0)
+        {
+            return Say(MonzeMessages.WelcomeAdminOnly, tone: MonzeTone.Error);
+        }
         try
         {
             await _readModelCache.InvalidateAsync(
@@ -359,8 +365,13 @@ public sealed partial class MonzeApp
 
         var version = await _authorization.SetWelcomeMessageAsync(
             clanId,
+            userId,
             normalized,
             cancellationToken);
+        if (version == 0)
+        {
+            return Say(MonzeMessages.WelcomeAdminOnly, tone: MonzeTone.Error);
+        }
         await InvalidateWelcomeAsync(clanId, version, cancellationToken);
         return new CommandOutcome
         {
@@ -381,7 +392,11 @@ public sealed partial class MonzeApp
             return Say(MonzeMessages.WelcomeAdminOnly, tone: MonzeTone.Error);
         }
 
-        var version = await _authorization.RemoveWelcomeEmbedAsync(clanId, cancellationToken);
+        var version = await _authorization.RemoveWelcomeEmbedAsync(clanId, userId, cancellationToken);
+        if (version == 0)
+        {
+            return Say(MonzeMessages.WelcomeAdminOnly, tone: MonzeTone.Error);
+        }
         await InvalidateWelcomeAsync(clanId, version, cancellationToken);
         return new CommandOutcome
         {
@@ -402,7 +417,11 @@ public sealed partial class MonzeApp
             return Say(MonzeMessages.WelcomeAdminOnly, tone: MonzeTone.Error);
         }
 
-        var version = await _authorization.RemoveWelcomeMessageAsync(clanId, cancellationToken);
+        var version = await _authorization.RemoveWelcomeMessageAsync(clanId, userId, cancellationToken);
+        if (version == 0)
+        {
+            return Say(MonzeMessages.WelcomeAdminOnly, tone: MonzeTone.Error);
+        }
         await InvalidateWelcomeAsync(clanId, version, cancellationToken);
         return new CommandOutcome
         {

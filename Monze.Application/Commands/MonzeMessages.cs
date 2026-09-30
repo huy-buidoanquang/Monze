@@ -30,6 +30,7 @@ public static class MonzeMessages
     public const string DelegateAlreadyExists = "Người này đã được ủy quyền trước đó.";
     public const string DelegateNotFound = "Người này không có trong danh sách ủy quyền.";
     public const string VoiceClaimConflict = "Phòng voice vừa được giữ bởi meeting khác. Hãy thử lại sau.";
+    public const string MeetingAgentInstruction = "Hãy bật Agent để bắt đầu tóm tắt cuộc hội thoại. Kết quả sẽ được gửi về sau khi cuộc hội thoại kết thúc.";
     public const string InvalidTime = "Thời điểm không hợp lệ.";
     public const string MeetingScheduleNotFound = "Không tìm thấy lịch họp đang chờ trong kênh này.";
     public const string MeetingScheduleCancelled = "Đã hủy lịch họp.";
@@ -57,6 +58,10 @@ public static class MonzeMessages
     public const string RoleAutomationDisabled = "Đã tắt cấp role tự động.";
     public const string UnknownClan = "Chưa xác định được clan.";
     public const string TemporaryFailure = "Lệnh gặp lỗi tạm thời. Hãy thử lại sau.";
+    public const string InteractionExpired = "Tương tác đã hết hạn hoặc không thuộc về bạn. Hãy chạy lại lệnh.";
+    public const string AvatarNotFound = "Không tìm thấy người dùng trong clan này.";
+    public const string AvatarUnavailable = "Người dùng này chưa có avatar công khai.";
+    public const string AvatarReplyRequired = "Hãy reply một tin nhắn rồi dùng *avatar reply message.";
     public const string MemberFallbackLabel = "thành viên";
     public const string DefaultWelcomeText = "Chào mừng bạn đến clan. Hãy xem kênh hướng dẫn và đọc quy định của clan.";
 
@@ -69,9 +74,6 @@ public static class MonzeMessages
         MeetingScheduleKind kind,
         DateTimeOffset next)
         => $"Đã lưu lịch \"{name}\" (#{id}), kiểu {kind.ToString().ToLowerInvariant()}, lần tới {next:dd/MM/yyyy HH:mm} UTC.";
-
-    public static string MeetingSuggested(string label)
-        => $"Đã gửi lời mời vào phòng {label}. Hãy bật Agent để bắt đầu cuộc hội thoại.";
 
     public static string RoleSelfAssignableChanged(bool enabled, string label)
         => enabled ? $"Đã cho phép tự chọn role {label}." : $"Đã tắt tự chọn role {label}.";

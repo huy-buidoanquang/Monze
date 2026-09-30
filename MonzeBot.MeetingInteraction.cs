@@ -9,6 +9,11 @@ public sealed partial class MonzeBot
 {
     private async Task HandleMeetingListAsync(IInteractionContext context)
     {
+        if (!await EnsurePrivateInteractionAsync(context))
+        {
+            return;
+        }
+
         var outcome = await _app.HandleMeetingAsync(
             context.Channel.ClanId,
             context.Channel.Id,
@@ -21,6 +26,11 @@ public sealed partial class MonzeBot
 
     private async Task HandleMeetingNowInteractionAsync(IInteractionContext context)
     {
+        if (!await EnsurePrivateInteractionAsync(context))
+        {
+            return;
+        }
+
         var outcome = await _app.HandleMeetingAsync(
             context.Channel.ClanId,
             context.Channel.Id,
@@ -33,6 +43,11 @@ public sealed partial class MonzeBot
 
     private async Task HandleMeetingCancelInteractionAsync(IInteractionContext context)
     {
+        if (!await EnsurePrivateInteractionAsync(context))
+        {
+            return;
+        }
+
         if (context.Interaction is not ButtonInteraction button
             || !MeetingButtonId.TryReadCancelId(button.CustomId, out var scheduleId))
         {

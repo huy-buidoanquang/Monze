@@ -65,6 +65,15 @@ public sealed partial class MonzeBot
             }
         }
 
+        if (args.Length > 0
+            && IsAvatarCommand(args[0])
+            && !(args.Length > 1 && args[1].Equals(MonzeCommandNames.Help, StringComparison.OrdinalIgnoreCase)))
+        {
+            await HandleAvatarAsync(context, args.Slice(1));
+            return;
+        }
+
+        var isAiCommand = IsAiCommand(args);
         if (!_commandRateLimiter.TryAcquire(
                 clanId,
                 context.Author.Id,
@@ -72,19 +81,21 @@ public sealed partial class MonzeBot
                 DateTimeOffset.UtcNow,
                 out var retryAfter))
         {
-            await context.ReplyAsync(MonzeMessageBuilder.Card(
+            var rateLimitResponse = MonzeMessageBuilder.Card(
                 MonzeMessages.TitleRateLimited,
                 MonzeMessages.RateLimited(retryAfter),
-                MonzeTone.Warn));
+                MonzeTone.Warn);
+            await ReplyCommandAsync(context, rateLimitResponse);
+
             return;
         }
 
+        var aiLoadingMessageId = 0L;
         try
         {
-            Mezon.Net.Models.ChannelMessageAckResponse? loading = null;
-            if (IsAiCommand(args))
+            if (isAiCommand)
             {
-                loading = await context.ReplyAsync(MonzeMessageBuilder.AiLoading());
+                aiLoadingMessageId = await ReplyCommandAsync(context, MonzeMessageBuilder.AiLoading());
             }
 
             var outcome = await _app.HandleMonzeAsync(
@@ -95,15 +106,16 @@ public sealed partial class MonzeBot
                 context.CancellationToken,
                 TryGetSingleMentionedUserId(context),
                 await BuildAiRequestAsync(context, args));
-            if (loading is { } pending)
+            if (isAiCommand)
             {
-                await context.Channel.UpdateMessageAsync(
-                    pending.MessageId,
+                await UpdateCommandAsync(
+                    context,
+                    aiLoadingMessageId,
                     MonzeMessageBuilder.Card(outcome, _commandOptions));
             }
             else
             {
-                await context.ReplyAsync(MonzeMessageBuilder.Card(outcome, _commandOptions));
+                await ReplyCommandAsync(context, MonzeMessageBuilder.Card(outcome, _commandOptions));
             }
         }
         catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
@@ -112,10 +124,18 @@ public sealed partial class MonzeBot
         catch (Exception ex)
         {
             _logger.LogError(ex, "Monze command failed for clan {ClanId} and channel {ChannelId}.", clanId, context.Channel.Id);
-            await context.ReplyAsync(MonzeMessageBuilder.Card(
+            var failureResponse = MonzeMessageBuilder.Card(
                 MonzeMessages.TitleMonze,
                 MonzeMessages.TemporaryFailure,
-                MonzeTone.Error));
+                MonzeTone.Error);
+            if (isAiCommand)
+            {
+                await UpdateCommandAsync(context, aiLoadingMessageId, failureResponse);
+            }
+            else
+            {
+                await context.ReplyAsync(failureResponse);
+            }
         }
     }
 
@@ -123,6 +143,11 @@ public sealed partial class MonzeBot
         => args.Length > 1
             && args[0].Equals(MonzeCommandNames.Ai, StringComparison.OrdinalIgnoreCase)
             && !args[1].Equals(MonzeCommandNames.Help, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsAvatarCommand(string value)
+        => value.Equals(MonzeCommandNames.Avatar, StringComparison.OrdinalIgnoreCase)
+            || value.Equals(MonzeCommandNames.AvatarAliasAva, StringComparison.OrdinalIgnoreCase)
+            || value.Equals(MonzeCommandNames.AvatarAliasAvt, StringComparison.OrdinalIgnoreCase);
 
     private async Task<AiRequestContext?> BuildAiRequestAsync(
         ICommandContext context,

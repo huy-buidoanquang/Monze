@@ -119,10 +119,20 @@ public sealed partial class MonzeBot
 
         var target = await client.GetChannelAsync(channelId, cancellationToken);
         var ack = await target.SendAsync(content);
+        var ackMessageId = TryReadMessageId(ack);
+        if (ackMessageId <= 0)
+        {
+            _logger.LogWarning(
+                "Agent status message returned an empty ACK. SessionId={SessionId}, ChannelId={ChannelId}.",
+                binding.SessionId,
+                channelId);
+            return;
+        }
+
         await _meeting.SetSessionNotificationMessageAsync(
             binding.SessionId,
             channelId,
-            ack.MessageId,
+            ackMessageId,
             cancellationToken);
     }
 

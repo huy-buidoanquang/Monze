@@ -25,7 +25,7 @@ try {
         Invoke-ReleaseBuild $testProject
     }
 
-    Write-Host 'Release build completed with explicit net10.0 framework and published Mezon.Net.Sdk 1.6.0 package references.'
+    Write-Host 'Release build completed with explicit net10.0 framework and published Mezon.Net.Sdk 1.6.1 package references.'
 }
 finally {
     Pop-Location

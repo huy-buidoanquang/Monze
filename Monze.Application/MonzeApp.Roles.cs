@@ -31,7 +31,15 @@ public sealed partial class MonzeApp
                 || rest[0].Equals(MonzeCommandActions.Off, StringComparison.OrdinalIgnoreCase)))
         {
             var enabled = rest[0].Equals(MonzeCommandActions.On, StringComparison.OrdinalIgnoreCase);
-            await _authorization.SetRoleAutomationEnabledAsync(clanId, enabled, cancellationToken);
+            var changed = await _authorization.SetRoleAutomationEnabledAsync(
+                clanId,
+                userId,
+                enabled,
+                cancellationToken);
+            if (!changed)
+            {
+                return Say(MonzeMessages.AdminOnly, title: MonzeMessages.TitleRole, tone: MonzeTone.Error);
+            }
             return Say(
                 enabled ? MonzeMessages.RoleAutomationEnabled : MonzeMessages.RoleAutomationDisabled,
                 title: MonzeMessages.TitleRole,
@@ -69,6 +77,7 @@ public sealed partial class MonzeApp
         {
             var removed = await _authorization.RemoveRoleRuleAsync(
                 clanId,
+                userId,
                 role.RoleId,
                 kind,
                 cancellationToken);
@@ -81,12 +90,17 @@ public sealed partial class MonzeApp
         var condition = kind == RoleRuleKind.Tenure
             ? DefaultTenureDays.ToString(CultureInfo.InvariantCulture)
             : null;
-        await _authorization.SetRoleRuleAsync(
+        var saved = await _authorization.SetRoleRuleAsync(
             clanId,
+            userId,
             role.RoleId,
             kind,
             condition,
             cancellationToken);
+        if (!saved)
+        {
+            return Say(MonzeMessages.AdminOnly, title: MonzeMessages.TitleRole, tone: MonzeTone.Error);
+        }
         return Say(
             $"Đã lưu rule {RoleRuleLabel(kind)} cho role {role.Label}.",
             title: MonzeMessages.TitleRole,

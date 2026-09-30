@@ -8,13 +8,14 @@ public static class MonzeHelpCatalog
         bool canManageWelcome,
         bool isOwner = false)
     {
-        var entries = new List<MonzeHelpEntry>(6)
+        var entries = new List<MonzeHelpEntry>(7)
         {
             Entry(options.DirectCommand(MonzeCommandNames.Meeting), "Xem lịch và gợi ý phòng voice trống."),
             Entry(options.DirectCommand(MonzeCommandNames.Summary), "Admin tra cứu summary theo mã."),
             Entry(options.DirectCommand(MonzeCommandNames.Welcome), canManageWelcome ? "Quản lý lời chào thành viên mới." : "Xem lời chào thành viên mới."),
             Entry(options.DirectCommand(MonzeCommandNames.Role), isAdmin ? "Bật tắt và cấu hình cấp role tự động." : "Chức năng role do admin quản lý."),
-            Entry(options.DirectCommand(MonzeCommandNames.Ai), "Tóm tắt, dịch, biên soạn và rút gọn nội dung.")
+            Entry(options.DirectCommand(MonzeCommandNames.Ai), "Tóm tắt, dịch, biên soạn và rút gọn nội dung."),
+            Entry(options.DirectCommand(MonzeCommandNames.Avatar), "Xem avatar của bạn hoặc thành viên trong clan.")
         };
 
         if (isOwner)
@@ -41,6 +42,7 @@ public static class MonzeHelpCatalog
             MonzeCommandNames.Setup => Setup(options, isOwner),
             MonzeCommandNames.Role => Role(options, isAdmin),
             MonzeCommandNames.Ai => Ai(options),
+            MonzeCommandNames.Avatar => Avatar(options),
             _ => [Entry(options.HasRoot ? options.Command(MonzeCommandNames.Help) : options.DirectCommand(MonzeCommandNames.Meeting), "Chọn một module để xem hướng dẫn.")]
         };
     }
@@ -102,6 +104,14 @@ public static class MonzeHelpCatalog
             Entry(options.DirectCommand(MonzeCommandNames.Ai, MonzeCommandNames.Translate, "<nội dung>"), "Dịch nội dung."),
             Entry(options.DirectCommand(MonzeCommandNames.Ai, MonzeCommandNames.Composer, "<nội dung>"), "Biên soạn hoặc viết lại nội dung."),
             Entry(options.DirectCommand(MonzeCommandNames.Ai, MonzeCommandNames.Simplify, "<nội dung>"), "Rút gọn nội dung.")
+        ];
+
+    private static IReadOnlyList<MonzeHelpEntry> Avatar(MonzeCommandOptions options)
+        =>
+        [
+            Entry(options.DirectCommand(MonzeCommandNames.Avatar), "Xem avatar của chính bạn."),
+            Entry(options.DirectCommand(MonzeCommandNames.Avatar, "<username|@user>"), "Xem avatar của thành viên được chọn."),
+            Entry(options.DirectCommand(MonzeCommandNames.Avatar, "reply", "message"), "Xem avatar của người gửi tin nhắn được reply.")
         ];
 
     private static MonzeHelpEntry Entry(string command, string description)

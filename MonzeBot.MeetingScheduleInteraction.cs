@@ -8,20 +8,28 @@ namespace Monze;
 
 public sealed partial class MonzeBot
 {
-    private static Task UpdateMeetingMessageAsync(
+    private Task UpdateMeetingMessageAsync(
         IInteractionContext context,
         MessageContent content)
-        => context.Message is not null
-            ? context.UpdateMessageAsync(content)
-            : context.RespondAsync(content);
+        => UpdatePrivateInteractionAsync(context, content);
 
-    private Task HandleMeetingScheduleFormAsync(IInteractionContext context)
+    private async Task HandleMeetingScheduleFormAsync(IInteractionContext context)
     {
-        return UpdateMeetingMessageAsync(context, MonzeMessageBuilder.MeetingScheduleForm());
+        if (!await EnsurePrivateInteractionAsync(context))
+        {
+            return;
+        }
+
+        await UpdateMeetingMessageAsync(context, MonzeMessageBuilder.MeetingScheduleForm());
     }
 
     private async Task HandleMeetingScheduleSubmitAsync(IInteractionContext context)
     {
+        if (!await EnsurePrivateInteractionAsync(context))
+        {
+            return;
+        }
+
         _logger.LogInformation(
             "Meeting schedule submit interaction received. MessageId={MessageId}, ChannelId={ChannelId}, HasCachedMessage={HasCachedMessage}",
             context.Interaction.MessageId,
