@@ -8,6 +8,7 @@ Entries below the current cleanup baseline may mention community commands that w
 - The production workload gate is 1,000 registered clans, 100 active clans, 200 message events/s, 20 commands/s, 100 meetings and 200 outbox deliveries/s.
 - PostgreSQL is the business source of truth. Redis is bounded L2 cache/invalidation. SQLite is only SDK message history.
 - Realtime callbacks do not perform database, Redis, API, SQLite, JSON serialization or logging work. They enqueue into bounded channels.
+- Monze now restores and builds against the synchronized Mezon.Net 1.6.2 package set. Source and historical runtime entries below may describe older package behavior and are not evidence for the current deployment.
 
 ## Hot path rules
 
@@ -80,11 +81,11 @@ On 2026-09-28, BenchmarkDotNet ShortRun on .NET 10 x64 measured `BoundedIngressT
 - The current dev site bundle was not republished during this local Monze run. Chrome console evidence still shows the deployed page dispatching `messages/clickButtonMessage`, and PostgreSQL remained `WelcomeEnabled=False;Version=22` after the attempted selection. No privileged button fallback was enabled.
 - End-to-end acceptance remains pending the web bundle deployment followed by a fresh Chrome selection and a PostgreSQL state assertion. The Monze route already requires `ServerAuthenticated` actor provenance.
 
-## SDK actor provenance and live UI verification (09:13–09:15)
+## Historical SDK actor provenance and live UI verification (09:13–09:15)
 
 - Interaction model types are now split one public type per file. `IInteraction` remains source compatible; actor provenance is exposed through `IInteractionActor`.
-- `HandleButtonAsync` marks the actor as `ClientSupplied`; `HandleSelectAsync` marks the actor as `ServerAuthenticated` according to the reviewed backend dropdown contract.
-- `RequireServerAuthenticatedActor()` rejects a protected route before the handler for a button event. Unit coverage includes button rejection and authenticated dropdown acceptance.
+- In the package/source snapshot used by this historical run, `HandleButtonAsync` marked the actor as `ClientSupplied` and `HandleSelectAsync` marked it as `ServerAuthenticated`.
+- In that snapshot, `RequireServerAuthenticatedActor()` rejected a protected button route before its handler. The reviewed 1.6.2 source supersedes this behavior: the backend derives both actors from authenticated request context and the SDK marks both as `ServerAuthenticated`.
 - Release verification passed: Mezon.Net SDK tests 74/74, Monze tests 32/32. The full Mezon.Net solution passed 233 tests with loopback permissions enabled; the sandbox-only run had 11 `HttpListenerException` failures.
 - The rebuilt process started at `2026-09-28 09:13:12.540 +07:00`, selected Redis L2 with `RedisConnected=True`, connected over WebSocket, discovered 5 clans and rejoined 5 clans.
 - Chrome verified the current process with `*monze help`, the embed field page, the `Lệnh` navigation button and the welcome `Cách dùng` button. Welcome mutation remains command-only until the web UI sends a server-authenticated actor event end to end.
@@ -311,6 +312,127 @@ On 2026-09-28, BenchmarkDotNet ShortRun on .NET 10 x64 measured `BoundedIngressT
 
 - Chrome sent `*monze help` in the authorized clan/channel after the latest Release restart. The response rendered the `Trợ giúp` embed with separate result content and `Lệnh`, `Sự kiện`, `Meeting` buttons.
 - PostgreSQL assertion remained green, the running process stayed connected, and Chrome error logs were `[]`.
+
+## SDK 1.6.2, message-gap durability and interaction replay gate (2026-10-02)
+
+- Runtime, infrastructure, tests and all lock files resolve the synchronized
+  Mezon.Net package set at `1.6.2`.
+- The accepted message callback retains the existing fixed-capacity partitioned
+  `TryWrite` path. When that queue is full, a value-type marker enters a separate
+  bounded single-reader queue; the worker coalesces at most 256 channel keys and
+  stores only the highest dropped message ID. PostgreSQL updates only channels that
+  already opted into message persistence.
+- During shutdown, canceled in-flight messages and unread bounded-queue entries are
+  coalesced by clan/channel and persisted as monotonic gap markers before the SQLite
+  history store is flushed. This shutdown-only dictionary does not change the
+  measured callback allocation path.
+- `meeting now` and valid schedule-submit interactions use PostgreSQL leases keyed
+  by clan, channel, source message and action. This work runs after SDK dispatch,
+  outside the measured realtime callback boundary.
+- Release build completed with zero warnings and errors. After removing two
+  caller-free meeting bind APIs and their syntax-only SQL test, the Redis and
+  PostgreSQL enabled suite passed `173/173`; it includes 26 PostgreSQL tests and one real
+  two-instance Redis test.
+- The final repository-port sweep also removed caller-free
+  `LatestPostedSummaryAsync` and `SetWelcomeEmbedAsync`; the suite remained
+  `173/173` in `docs/test-artifacts/20261002-repository-port-cleanup-full.trx`.
+- A later transcript timeout hardening pass removed the nested Agent retry loop and
+  applies one configured HTTP timeout across authentication, retries and response
+  reading. This bounds one `session_done` transcript operation to 30 seconds instead
+  of a possible roughly 4.5 minutes. That PostgreSQL and Redis enabled checkpoint was
+  `176/176` in `docs/test-artifacts/20261002-transcript-timeout-full.trx`.
+- BenchmarkDotNet ShortRun measured `PartitionedIngressTryWrite` at `27.4787 ns/op`,
+  `CommandArgumentsSingleItem` at `0.7986 ns/op` and
+  `CommandRateLimitKnownKey` at `17.7406 ns/op`. Each reported no managed allocation
+  and no GC collections in the measured operation.
+- A fresh 30-second bounded profile produced 6,000 messages, 600 commands and 6,000
+  outbox items for 1,000 registered/100 active clans with zero drops or rejects.
+  Maximum ingress and outbox depth were 4 and 5 of 8,192; maximum managed heap was
+  2,867,528 bytes, working set 38,387,712 bytes and
+  Gen0/Gen1/Gen2 counts were 0/0/0.
+- These measurements exclude SDK decode, PostgreSQL/Redis I/O, Mezon delivery and
+  Agent traffic. They do not prove whole-stack zero allocation or production
+  capacity for 1,000 clans.
+- After the final Chrome/AI/meeting/schedule workload, a 20-sample process series over
+  19 seconds recorded working set `110,358,528–111,030,272` bytes, private bytes
+  `36,511,744–37,146,624`, 25–26 threads and `0.015625` CPU seconds of change. This is
+  a short post-workload observation only; artifact:
+  `docs/test-artifacts/20261002-final-live-resource-sample.json`.
+- After the final port cleanup, PID `23212` connected Redis/WebSocket, rejoined five
+  clans and produced empty stderr. A 20-sample idle observation over 19 seconds
+  recorded working set `88,104,960–97,460,224` bytes, private bytes
+  `26,050,560–35,471,360`, 24–25 threads and `0.109375` CPU seconds of change;
+  artifact: `docs/test-artifacts/20261002-port-cleanup-resource-sample.json`.
+- The critical PostgreSQL meeting/Agent/outbox group passed 20 consecutive runs,
+  280 case executions in total with zero failures, while the live worker was stopped
+  to avoid fixture interference. The same Release binary then restarted as PID
+  `19072`, connected Redis/WebSocket, rejoined five clans and passed the database
+  assertion with empty stderr.
+- The eight transcript client cases and 14 critical PostgreSQL cases then passed 20
+  combined runs, 440 case executions in total with zero failures. PID `13064` runs the
+  resulting Release binary; its current startup log shows Redis/WebSocket connected,
+  five clans rejoined, no warning/failure marker and empty stderr. This is bounded
+  correctness and short runtime evidence, not a full-stack soak.
+- A fresh 20-sample, 19-second observation of PID `13064` recorded working set
+  `95,625,216–96,366,592` bytes, private bytes `31,576,064–32,559,104`, 26–27
+  threads, 605–608 handles and `0.03125` CPU seconds of change. Artifact:
+  `docs/test-artifacts/20261002-summary-timeout-resource-sample.json`.
+- The summary maintenance worker no longer leases up to 32 rows before sequential
+  HTTP processing. It claims one row immediately before work and retains the existing
+  32-item cycle cap, preventing later rows from expiring before processing starts.
+  The red test observed a single claim limit of 32; the green test observed
+  `[1, 1, 1]` for two rows and the terminating empty claim. That suite passed
+  `177/177`; the transcript, lease and critical PostgreSQL group passed 20 combined
+  runs, 460 case executions with zero failures.
+- PID `39592` runs the resulting binary. A 20-sample, 19-second observation recorded
+  working set `85,319,680–86,343,680` bytes, private bytes
+  `24,547,328–25,513,984`, 37–38 threads, 674–679 handles and `0.015625` CPU
+  seconds of change. Artifact:
+  `docs/test-artifacts/20261002-summary-lease-resource-sample.json`.
+- Startup clan joins now retain the successful first-pass ID set and send the
+  post-discovery batch only for failed or newly discovered clans. This removes one
+  complete Monze join pass at the 1,000-clan target while retaining full-registry
+  reconnect behavior. The current suite passed `178/178`; PID `21972` logged one
+  Monze startup batch of five successful joins and no second batch after discovery.
+  SDK-internal seed joins are outside that Monze batch count.
+- A 20-sample, 19-second observation of PID `21972` recorded working set
+  `85,204,992–88,215,552` bytes, private bytes `23,572,480–26,578,944`, 36–37
+  threads, 668–671 handles and `0.046875` CPU seconds of change. Artifact:
+  `docs/test-artifacts/20261002-clan-join-resource-sample.json`.
+- Summary maintenance now has four fixed lanes instead of one sequential lane. Each
+  lane claims one lease just before external work, and a shared atomic counter keeps
+  the existing 32-item cycle cap. The focused worker plus real PostgreSQL claim test
+  passed `3/3`; four concurrent `SKIP LOCKED` calls returned distinct rooms and lease
+  tokens. That DB/Redis checkpoint passed `180/180`, and the 25-case critical group
+  passed 20 runs (`500/500`) without an intermittent failure.
+- Final PID `30088` connected Redis/WebSocket, joined five clans in one Monze batch,
+  and produced empty stderr. Its 20-sample, 19-second observation recorded working
+  set `84,996,096–88,375,296` bytes, private bytes
+  `23,773,184–26,861,568`, 36–37 threads, 671–676 handles and `0.0625` CPU seconds
+  of change. This remains a short idle observation, not a full-stack soak.
+- Global Agent SSE traffic is now scoped before any PostgreSQL inbox claim. The
+  callback accepts only a resolved voice channel in the durable known-clan set,
+  validates an optional payload clan, uses the SDK channel cache before one direct
+  channel-detail lookup and retries only transient lookup failures. Old unmatched
+  Agent rows were removed by append-only migration `028_agent_event_scope`; a unique
+  `(room_id, event_type)` index prevents concurrent duplicate pending transitions.
+- The post-build PostgreSQL and real two-instance Redis suite passed `196/196`. The
+  43-case transcript, worker, Agent-scope and PostgreSQL meeting/outbox group passed
+  20 independent processes (`860/860`) without an intermittent failure. The final
+  database state had zero Agent inbox rows, zero pending Agent rows and zero duplicate
+  pending keys.
+- The 2026-10-04 two-account continuation increased the current PostgreSQL/Redis suite
+  to `200/200`. Voice-profile event construction plus bounded queue roundtrip measured
+  0 B after warmup and passed 20 independent test processes (`40/40`). Live session
+  `3620` completed with two sent reply-bound summary messages; the runtime sample and
+  participant correction are recorded in
+  `docs/test-artifacts/20261004-multispeaker-agent-summary-verification.md`.
+- PID `27144` connected Redis and the dev WebSocket and joined five clans with zero
+  warning, failure or stderr records in the captured canary. Its 20-sample,
+  19-second observation recorded working set `94,851,072–104,038,400` bytes, private
+  bytes `32,137,216–40,382,464`, 24–28 threads, 613–637 handles and `0.234375` CPU
+  seconds of change. The working set was non-monotonic and the sample remains too
+  short for a leak or capacity conclusion.
 
 ## Ingress port extraction and final runtime check (14:14, 2026-09-28)
 

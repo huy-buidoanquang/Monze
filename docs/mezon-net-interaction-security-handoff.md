@@ -1,90 +1,64 @@
 # Interaction actor authentication and ephemeral delivery handoff
 
-## Evidence
+## Current source and package contract
 
-- `mezon-api/server/api_interactive_message.go` forwards `MessageButtonClicked`
-  with the incoming `UserId` unchanged. `DropdownBoxSelected` replaces the
-  incoming user ID with the authenticated request user ID.
-- `Mezon.Net/src/Mezon.Net.Sdk/Interactions/InteractionRouter.cs` constructs
-  `ButtonInteraction` with `InteractionActorTrust.ClientSupplied`.
-- The same router marks `SelectInteraction` as
-  `InteractionActorTrust.ServerAuthenticated`.
-- `Mezon.Net` 1.6.1 exposes `Channel.SendEphemeralAsync`,
-  `Channel.UpdateEphemeralAsync`, and `Channel.DeleteEphemeralAsync`. It sends an
-  `ephemeral_message_send` envelope through the socket and returns the server
-  acknowledgement.
-- Live Monze 1.6.1 tests in clan `2104288434238525440` proved recipient
-  isolation for command responses: the actor saw the help and meeting
-  responses in Chrome, while a second user in the same channel saw only their
-  own command and no private response.
-- The current dev backend did not produce a new Monze response when either
-  Chrome user clicked a visible help or schedule button. This is an unresolved
-  deployment-contract result, not evidence that the button handler is safe or
-  functional in production.
-- A later 1.6.1 live run reproduced an empty `ChannelMessageAckResponse` for
-  some ephemeral operations. Reading `MessageId` from that default value threw
-  in Monze before the guard was added. The guard now treats an empty ACK as
-  message ID `0`; the regression test passes, but an empty ACK still prevents
-  reliable loading-message update/delete because there is no message ID.
+- `mezon-api/server/api_interactive_message.go` copies a button event and replaces
+  its incoming `UserId` with the authenticated request-context user. The dropdown
+  path derives `UserId` from the same context. The backend regression test sends a
+  forged button user ID and asserts that it is replaced without mutating the input.
+- The reviewed SDK source marks routed button and dropdown actors as
+  `InteractionActorTrust.ServerAuthenticated`. Its protected routes reject actors
+  that do not carry that provenance.
+- Monze consumes `Mezon.Net.Sdk`, `Mezon.Net.Sdk.Caching.Redis`, and
+  `Mezon.Net.Sdk.Caching.Sqlite` 1.6.2. The published package exposes
+  `Channel.SendEphemeralAsync`, `Channel.UpdateEphemeralAsync`,
+  `Channel.DeleteEphemeralAsync`, and matching interaction-context update/delete
+  methods.
+- Restore, lock-file inspection, Release build, and the 142-test Monze suite verify
+  package consumption and the public surface. They do not prove which backend or
+  web bundle is currently deployed in the dev environment.
 
-The source path distinguishes the two directions. `mezon-api/server/core_channel.go`
-contains the user-to-bot `sendEphemeralMessageToBot` path, while the realtime
-server handles the bot-to-user envelope with message code `12` and the supplied
-recipient IDs. The live test above validates the latter path for the published
-1.6.1 package.
+## Historical live evidence from 1.6.1
+
+- A two-user Chrome test in clan `2104288434238525440` showed recipient isolation
+  for command responses: each user saw only their own ephemeral response.
+- The dev deployment used in that run did not deliver a new Monze response for a
+  visible help or schedule button click. This remains historical deployment evidence,
+  not evidence about the current 1.6.2 binary or current backend deployment.
+- Some ephemeral operations returned an empty `ChannelMessageAckResponse`. Monze now
+  treats that value as message ID `0` instead of dereferencing it. Without a message
+  ID, reliable update/delete of a loading or interactive message is still impossible.
+
+The source path has two distinct directions. `mezon-api/server/core_channel.go`
+contains user-to-bot ephemeral delivery. The realtime server handles bot-to-user
+ephemeral envelopes and recipient IDs. The historical two-user check covered the
+bot-to-user direction only.
 
 ## Monze behavior
 
-Monze sends every response containing components through
-`Channel.SendEphemeralAsync`. Private avatar responses also use that path.
-When a user operates a component, Monze sends a new private response and binds
-the returned message ID to the same actor. SDK 1.6.1 exposes public
-ephemeral update/delete methods, so Monze does not use a standard-message update
-as a privacy fallback.
+Only responses containing interactive components are sent as ephemeral messages.
+Avatar output and Agent meeting summaries remain ordinary channel messages. When a
+user operates a component, Monze updates or deletes the same private message and
+binds it to the initiating clan, channel, message, and user.
 
-Every registered Monze button route requires a server-authenticated actor at
-the SDK router boundary, and the handler repeats the ownership check using the
-bound clan, channel, message and user IDs. It rejects an interaction when the
-actor is missing, mismatched, or not server authenticated. Dropdown interaction
-continues only when the SDK marks it server authenticated.
+Every registered state-changing route requires a server-authenticated actor at the
+SDK router boundary. The Monze handler then repeats the private-message ownership
+check. Owner/admin predicates for welcome, role, and delegate writes are evaluated
+again in PostgreSQL. Meeting schedule listing and cancellation derive authorization
+inside their repository operation rather than trusting an earlier boolean result.
 
-The workspace now contains the matching upstream patch: `mezon-api` replaces
-the incoming button `UserId` with the authenticated request user, and the SDK
-marks the decoded button actor server authenticated. The SDK build and its
-four actor-trust tests pass. The API regression test is present. It was run
-with a temporary local replace for `mezon-cache`, but the `server` package is
-currently blocked by pre-existing compile errors in `api_channel.go`
-(`ValidateChannelTopic`) and `consumer.go` (undefined `err`); those files were
-already dirty and were not changed by this patch. The published 1.6.1 package
-and the dev backend have not been replaced by these source changes, so the
-Chrome button flow remains unverified until both services are deployed.
+## Remaining live acceptance gate
 
-State-changing welcome, role, and delegate writes also repeat the owner/admin
-predicate inside PostgreSQL. Meeting schedule listing and cancellation derive
-the same predicate in their SQL instead of trusting an `includeAll` flag that
-was computed by an earlier authorization query. This closes the revocation
-race between a permission check and the write or cancellation.
+Run a fresh test with the exact 1.6.2 package, the intended backend deployment, and
+two real users in one dev clan:
 
-## Required upstream contract follow-up for button flows
+1. Send one interactive response to each user and prove recipient isolation.
+2. Click a button with a forged client `user_id`; prove the bot receives the
+   authenticated user and rejects the other user's private message.
+3. Repeat for dropdown/radio input.
+4. Verify send, update, and delete each return a usable message ID and affect only
+   the initiating user's ephemeral message.
+5. Verify PostgreSQL changes only for the authorized clan and user.
 
-1. Derive `UserId` from the authenticated request context in
-   `ApiServer.MessageButtonClick`, matching `DropdownBoxSelected`.
-2. Add a regression test that sends a mismatched incoming user ID and asserts
-   the emitted notification contains the authenticated caller ID.
-3. Mark the decoded button actor server authenticated in Mezon.Net only after
-   the backend contract is deployed.
-4. Publish the SDK change, update Monze, and live-test cross-user and
-   cross-clan button clicks with the exact published package.
-
-## Required upstream contract follow-up for ephemeral responses
-
-Keep the public ephemeral update and delete operations covered by tests with an
-authenticated bot sender, recipient ID, message ID, and recipient isolation.
-The bot-to-user ephemeral send, update, and delete operations exist in 1.6.1,
-but the live empty-ACK case still needs a reliable server acknowledgement with
-the created message ID.
-
-The acceptance test for the remaining SDK work must use two real users in one
-dev clan: the sender must observe its own response, the second user must not
-observe it, and update/delete must affect only the sender's response. A
-successful acknowledgement on the bot socket alone is insufficient.
+An SDK unit test, socket acknowledgement, or successful build alone does not close
+this live deployment gate.

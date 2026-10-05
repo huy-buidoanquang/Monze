@@ -40,12 +40,6 @@ public sealed class PostgresUserProfileRepositoryTests
             Assert.Equal("Clan Nick", stored!.Label);
             Assert.Equal("https://cdn.example/avatar.png", stored.AvatarUrl);
 
-            var byUsername = await repository.FindByUsernameAsync(
-                clanId,
-                "USERNAME",
-                CancellationToken.None);
-            Assert.Equal(userId, byUsername?.UserId);
-
             await repository.UpsertAsync(
                 clanId,
                 userId,

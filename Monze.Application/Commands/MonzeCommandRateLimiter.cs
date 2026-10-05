@@ -73,7 +73,6 @@ public sealed class MonzeCommandRateLimiter
     private MonzeRateLimitRule GetRule(string command)
     {
         if (command is MonzeCommandNames.Ai
-            or MonzeCommandNames.AiSummary
             or MonzeCommandNames.Translate
             or MonzeCommandNames.Composer
             or MonzeCommandNames.Simplify)
@@ -121,4 +120,3 @@ public sealed class MonzeCommandRateLimiter
         }
     }
 }
-

@@ -90,6 +90,8 @@ internal static class Program
         builder.Services.AddSingleton(new PostgresConnection(postgresBuilder.ConnectionString));
         builder.Services.AddSingleton<IClanRegistryRepository, PostgresClanRegistryRepository>();
         builder.Services.AddSingleton<IAuthorizationRepository, PostgresAuthorizationRepository>();
+        builder.Services.AddSingleton<IWelcomeRepository, PostgresWelcomeRepository>();
+        builder.Services.AddSingleton<IRoleRepository, PostgresRoleRepository>();
         builder.Services.AddSingleton<IMeetingRepository, PostgresMeetingRepository>();
         builder.Services.AddSingleton<IScheduledMeetingRepository, PostgresScheduledMeetingRepository>();
         builder.Services.AddSingleton<ISchedulingRepository, PostgresSchedulingRepository>();
@@ -97,9 +99,13 @@ internal static class Program
         builder.Services.AddSingleton<IAiUsageRepository, PostgresAiUsageRepository>();
         builder.Services.AddSingleton<IMessageHistoryRepository, PostgresMessageHistoryRepository>();
         builder.Services.AddSingleton<ICommandInboxRepository, PostgresCommandInboxRepository>();
+        builder.Services.AddSingleton<IInteractionInboxRepository, PostgresInteractionInboxRepository>();
         builder.Services.AddSingleton<IUserProfileRepository, PostgresUserProfileRepository>();
+        builder.Services.AddSingleton<MeetingSummaryComposer>();
         builder.Services.AddSingleton(sp => new MonzeApp(
             sp.GetRequiredService<IAuthorizationRepository>(),
+            sp.GetRequiredService<IWelcomeRepository>(),
+            sp.GetRequiredService<IRoleRepository>(),
             sp.GetRequiredService<IMeetingRepository>(),
             sp.GetRequiredService<ISchedulingRepository>(),
             sp.GetRequiredService<IAiUsageRepository>(),
@@ -144,8 +150,13 @@ internal static class Program
 
         builder.Services.AddSingleton<ITranscriptClient>(sp =>
         {
-            var baseUrl = sp.GetRequiredService<IConfiguration>()["Mezon:AgentBaseUrl"];
-            if (string.IsNullOrWhiteSpace(baseUrl))
+            var configuration = sp.GetRequiredService<IConfiguration>();
+            var baseUrl = configuration["Mezon:AgentBaseUrl"];
+            var transcriptBotId = configuration.GetValue<long>("Mezon:BotId");
+            var transcriptBotToken = configuration["Mezon:Token"];
+            if (string.IsNullOrWhiteSpace(baseUrl)
+                || transcriptBotId <= 0
+                || string.IsNullOrWhiteSpace(transcriptBotToken))
             {
                 return new DisabledTranscriptClient();
             }
@@ -156,7 +167,7 @@ internal static class Program
                 Timeout = TimeSpan.FromSeconds(30)
             };
             http.DefaultRequestHeaders.UserAgent.ParseAdd("Monze/1.0");
-            return new HttpTranscriptClient(http);
+            return new HttpTranscriptClient(http, transcriptBotId, transcriptBotToken);
         });
 
         builder.Services.AddHostedService<StartupSchemaValidator>();

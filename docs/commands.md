@@ -1,6 +1,7 @@
 # Monze commands
 
-`Monze:Commands` controls the command surface without changing application code.
+`Monze:Commands` controls the command prefix and optional `monze` root without
+changing application code.
 
 ```json
 {
@@ -13,12 +14,29 @@
 }
 ```
 
-- `Prefix: "*"` produces `*monze welcome on`.
-- `Prefix: ""` removes the command prefix.
-- `Root: "monze"` produces rooted commands such as `*monze welcome on`.
-- `Root: ""` registers module commands directly, such as `*welcome on` and `*sum <nội dung>`.
-- Role administration supports self-select and persisted automatic rules: `*monze role allow <role>`, `*monze role self <role>`, `*monze role rule join <role>`, `tenure <role> | <days>`, `existing <role> | <required role>`, and `role rule remove <kind> <role>`.
-- AI commands are `sum`, `dich`, `viet` and `rutgon`; meeting and summary keep their direct command names.
-- Meeting and summary keep their direct command names: `*meeting ...` and `*summary`.
+- `Prefix: "*"` produces `*monze welcome on` and `*welcome on`.
+- `Prefix: ""` removes the leading `*`.
+- `Root: "monze"` enables `*monze help` and rooted module commands. Every module
+  command is also registered directly, for example `*meeting` and `*welcome on`.
+- `Root: ""` selects rootless mode; general help becomes `*help`.
 
-The default root is `monze` when `Root` is absent. Set an explicit empty string to select rootless mode. Keep the configuration in an ignored local or secret file when it contains credentials.
+## Current modules
+
+- Meeting: `meeting`, `meeting now`, `meeting cancel <id>`, and once/daily/weekly
+  schedules. The interactive meeting card also opens the schedule form.
+- Summary: `summary <id>` for owner/admin retrieval of a stored meeting summary.
+- Welcome: `welcome on|off`, `welcome message <text>`, `welcome message remove`,
+  `welcome setup`, `welcome preview`, and `welcome setup remove`.
+- Role: `role on|off`, `role join <role>`, `role tenure <role>`, and
+  `role join|tenure remove <role>`.
+- AI: `ai summary`, `ai translate`, `ai composer`, and `ai simplify`.
+- Avatar: `avatar`, `avatar <username|@user>`, and `avatar reply message`; aliases
+  `ava` and `avt` are retained.
+- Setup: `setup admin add <@user>` and `setup admin remove <@user>`; only the clan
+  owner sees and may execute this module. Adding an admin requires the target to be
+  present in the current Mezon clan roster.
+
+Append `help` to a module command to render its permission-aware guide. General help
+shows only module representatives and uses buttons to navigate the same private
+message. Keep credentials in ignored local settings, environment variables, or an
+approved secret store.

@@ -30,4 +30,16 @@ public sealed class AgentEventPayloadTests
 
         Assert.False(AgentEventPayload.TryParse("not-json", out _));
     }
+
+    [Fact]
+    public void Parses_voice_scope_from_ended_and_summary_payloads()
+    {
+        const string raw =
+            "{\"room\":{\"room_id\":\"room-ended\",\"room_name\":\"2104288438869037056\"},\"timestamp\":\"2026-10-02T08:00:00Z\"}";
+
+        Assert.True(AgentEventPayload.TryParse(raw, out var payload));
+        Assert.Equal("room-ended", payload.RoomId);
+        Assert.Equal(2104288438869037056L, payload.VoiceChannelId);
+        Assert.Null(payload.ClanId);
+    }
 }

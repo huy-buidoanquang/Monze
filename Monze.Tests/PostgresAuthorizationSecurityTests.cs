@@ -27,19 +27,21 @@ public sealed class PostgresAuthorizationSecurityTests
         var roleId = Random.Shared.NextInt64(1, long.MaxValue - 1);
 
         await using var dataSource = NpgsqlDataSource.Create(connectionString!);
-        var repository = new PostgresAuthorizationRepository(dataSource);
-        var before = await repository.GetWelcomeAsync(clanId, CancellationToken.None);
+        var authorization = new PostgresAuthorizationRepository(dataSource);
+        var welcome = new PostgresWelcomeRepository(dataSource);
+        var roles = new PostgresRoleRepository(dataSource);
+        var before = await welcome.GetWelcomeAsync(clanId, CancellationToken.None);
 
         try
         {
-            Assert.False(await repository.SetDelegateAsync(
+            Assert.False(await authorization.SetDelegateAsync(
                 clanId,
                 unauthorizedUserId,
                 targetUserId,
                 true,
                 CancellationToken.None));
 
-            Assert.Equal(0, await repository.SetWelcomeConfigurationAsync(
+            Assert.Equal(0, await welcome.SetWelcomeConfigurationAsync(
                 clanId,
                 unauthorizedUserId,
                 before?.Enabled ?? false,
@@ -47,13 +49,13 @@ public sealed class PostgresAuthorizationSecurityTests
                 new WelcomeEmbedSettings(Title: "must-not-be-written"),
                 CancellationToken.None));
 
-            Assert.False(await repository.SetRoleAutomationEnabledAsync(
+            Assert.False(await roles.SetRoleAutomationEnabledAsync(
                 clanId,
                 unauthorizedUserId,
                 false,
                 CancellationToken.None));
 
-            Assert.False(await repository.SetRoleRuleAsync(
+            Assert.False(await roles.SetRoleRuleAsync(
                 clanId,
                 unauthorizedUserId,
                 roleId,
@@ -61,14 +63,14 @@ public sealed class PostgresAuthorizationSecurityTests
                 null,
                 CancellationToken.None));
 
-            Assert.False(await repository.RemoveRoleRuleAsync(
+            Assert.False(await roles.RemoveRoleRuleAsync(
                 clanId,
                 unauthorizedUserId,
                 roleId,
                 Monze.Domain.RoleRuleKind.OnJoin,
                 CancellationToken.None));
 
-            var after = await repository.GetWelcomeAsync(clanId, CancellationToken.None);
+            var after = await welcome.GetWelcomeAsync(clanId, CancellationToken.None);
             Assert.Equal(before, after);
         }
         finally

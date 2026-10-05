@@ -10,5 +10,6 @@ public interface IScheduledMeetingRepository
         string announcementBody,
         string contentJson,
         bool mentionEveryone,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        string? voiceChannelLabel = null);
 }

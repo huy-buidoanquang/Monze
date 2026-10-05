@@ -73,34 +73,6 @@ public sealed class PostgresUserProfileRepository : IUserProfileRepository
             : null;
     }
 
-    public async Task<UserProfileSnapshot?> FindByUsernameAsync(
-        long clanId,
-        string username,
-        CancellationToken cancellationToken)
-    {
-        if (clanId <= 0 || string.IsNullOrWhiteSpace(username))
-        {
-            return null;
-        }
-
-        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
-        await using var command = new NpgsqlCommand(
-            """
-            SELECT clan_id, user_id, clan_nick, display_name, username, avatar_url, updated_at
-            FROM clan_user_profile
-            WHERE clan_id = @clan AND lower(username) = lower(@username)
-            ORDER BY updated_at DESC, user_id
-            LIMIT 1;
-            """,
-            connection);
-        command.Parameters.AddWithValue("clan", NpgsqlDbType.Bigint, clanId);
-        command.Parameters.AddWithValue("username", NpgsqlDbType.Text, username.Trim());
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        return await reader.ReadAsync(cancellationToken)
-            ? ReadSnapshot(reader)
-            : null;
-    }
-
     private static UserProfileSnapshot ReadSnapshot(NpgsqlDataReader reader)
         => new(
             reader.GetInt64(0),

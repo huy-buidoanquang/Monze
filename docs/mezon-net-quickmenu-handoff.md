@@ -2,85 +2,50 @@
 
 ## Current Monze status
 
-Monze does not activate quick menu provisioning yet. The published SDK exposes
-the add operation, and the backend currently de-duplicates an identical
-bot/clan/channel/menu/type row. The wrapper still lacks the public read operation
-needed to reconcile drift, so provisioning must be bounded and tied to a verified
-bot-join or clan-registration event instead of running an unbounded startup loop.
-The menu set that should be provisioned is:
+Monze does not provision or execute quick-menu actions. The intended menu set remains:
 
 - `AI summary`
 - `AI translate`
 - `AI composer`
 - `AI simplify`
 
-The intended provisioning uses the backend's verified quick menu type and action
-contract for AI actions, provisions a newly confirmed clan once, and bounds API
-calls with a small worker queue. The exact menu type, action message, and menu
-scope still require a live canary before enabling the feature at 1,000-clan scale.
+Enabling the feature requires a bounded provisioning worker, reconciliation by clan
+and channel, authenticated actor checks, AI budget/rate limits, source-message scope,
+and durable idempotency. Those product changes are outside the current retained
+command implementation.
 
-## SDK 1.6.0 limitation
+## SDK 1.6.2 prerequisite status
 
-The published SDK exposes:
+The SDK limitation recorded for 1.6.0 is resolved in the reviewed 1.6.2 surface:
 
-```csharp
-event Func<Task> QuickMenuReceived;
-```
+- `MezonClient.QuickMenuReceivedData` exposes a typed
+  `QuickMenuReceivedEventData` callback while retaining the parameterless event for
+  compatibility.
+- The payload preserves `MenuName`, source `Message`, `HasMessage`, `SenderId`,
+  `MessageSenderId`, `MessageId`, `ClanId`, and `ChannelId`.
+- `MezonClient.ListQuickMenuAccessAsync` is public alongside add, update, and delete.
+- Client tests cover payload dispatch, malformed/empty data, handler isolation, and
+  compatibility delivery in the reviewed source tree.
 
-The client event loop currently sees `Envelope.MessageOneofCase.QuickMenuEvent`
-but invokes that event without passing the envelope payload. The payload contains
-the fields Monze needs to execute an AI action safely:
+Monze restore and Release build consume the published 1.6.2 package. The Monze SDK
+surface test checks the public list method; live quick-menu delivery has not been
+verified against the current dev backend and web bundle.
 
-- selected `menu_name`;
-- source message content and metadata;
-- source `message_id`;
-- source `message_sender_id`.
+## Remaining implementation and acceptance gate
 
-The canonical web client sends those fields through `writeQuickMenuEvent` when a
-user chooses a right-click quick menu. Because SDK 1.6.0 discards them, Monze
-cannot determine which message to summarize, which user initiated the action, or
-which clan/channel must be used. Registering a parameterless callback and guessing
-the last message would create a cross-user and cross-message authorization bug.
+Before Monze enables AI quick menus:
 
-The loss is visible in `Mezon.Net/src/Mezon.Net.Client/MezonClient.EventHandling.cs`:
-the `QuickMenuEvent` case invokes the parameterless event only. The upstream
-payload is defined in `mezon-proto-server/proto/realtime.proto` as
-`QuickMenuDataEvent` and includes `menu_name`, `message`, `sender_id` and
-`message_sender_id`. The low-level SDK API already has
-`ListQuickMenuAccessAsync`; the public `MezonClient` wrapper currently exposes
-only add, update and delete operations. The backend `AddQuickMenu` path checks
-for an existing row with the same menu name, type, clan and channel before
-inserting, so repeated adds are not by themselves a correctness reason to
-duplicate rows. A public list wrapper is still needed for drift detection and
-cleanup.
+1. Reconcile existing menus with `ListQuickMenuAccessAsync`; do not blindly add on
+   every startup.
+2. Subscribe to `QuickMenuReceivedData` and reject events without a source message,
+   positive clan/channel/message IDs, or an authenticated actor contract.
+3. Verify the source message belongs to the event clan/channel and remains visible to
+   the caller.
+4. Apply the existing AI concurrency, rate, and budget checks before provider calls.
+5. Persist a dedupe key so replayed events cannot spend budget or post twice.
+6. Bound provisioning and execution queues, retries, payload size, and cancellation.
 
-## Required SDK change before AI quick menu execution
-
-Publish the next SDK patch with a typed event preserving the decoded payload and
-the authenticated event context, for example:
-
-```csharp
-event Func<QuickMenuDataEventResponse, Task> QuickMenuReceived;
-```
-
-The change must be made in the SDK event model and event dispatch path, not in
-generated protobuf files. Required tests:
-
-1. Decode a quick menu envelope and preserve menu name, message id, sender id,
-   channel/clan and message metadata.
-2. Dispatch the payload to every subscriber without a shared mutable buffer.
-3. Verify cancellation, reconnect and handler exception isolation.
-4. Verify a malformed payload is rejected without invoking Monze's AI handler.
-5. Benchmark the event dispatch after warmup and record allocation/op.
-
-The SDK patch also needs a public `ListQuickMenuAccessAsync` wrapper so Monze can
-reconcile existing menus and remove drift. After that package is published,
-Monze should subscribe to the typed event, validate the event clan/channel and
-authenticated sender, apply the AI rate/budget checks, and use the supplied source
-message as explicit input. No quick menu AI result is considered implemented until
-those checks pass in a live Chrome test.
-
-The live acceptance test must select each AI menu from a real source message and
-prove that the selected menu name, source message ID, authenticated user, clan
-and channel reach Monze together. A callback that fires without those values is
-not sufficient for enabling the feature.
+The live canary must select each AI menu from a real source message and prove that
+menu name, source message ID, authenticated user, clan, and channel reach Monze
+together. PostgreSQL usage and the visible result must each occur once under replay.
+Package compilation or a callback without those fields is insufficient evidence.

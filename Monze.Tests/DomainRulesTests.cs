@@ -39,6 +39,23 @@ public class DomainRulesTests
     }
 
     [Fact]
+    public void Clan_join_plan_retries_only_failed_or_new_clans_after_discovery()
+    {
+        var clans = new[]
+        {
+            new KnownClan(1, 10),
+            new KnownClan(2, 20),
+            new KnownClan(3, 30)
+        };
+
+        var pending = ClanDiscovery.PendingJoins(clans, new HashSet<long> { 1, 3 });
+
+        var clan = Assert.Single(pending);
+        Assert.Equal(2, clan.ClanId);
+        Assert.Equal(20, clan.OwnerId);
+    }
+
+    [Fact]
     public void Meeting_summary_is_posted_once_from_live()
     {
         Assert.Equal(MeetingStatus.Suggested, MeetingFlow.Suggest(MeetingStatus.Requested));
@@ -46,6 +63,7 @@ public class DomainRulesTests
         Assert.Equal(MeetingStatus.Live, live);
         Assert.False(MeetingFlow.TryBindRoom(MeetingStatus.Requested, true, out _));
         Assert.Equal(MeetingStatus.Posted, MeetingFlow.OnSummaryStored(MeetingStatus.Live));
+        Assert.Equal(MeetingStatus.Posted, MeetingFlow.OnSummaryStored(MeetingStatus.SummaryFailed));
         Assert.Equal(MeetingStatus.SummaryPending, MeetingFlow.OnSummaryFailed(MeetingStatus.Live));
     }
 
@@ -90,6 +108,21 @@ public class DomainRulesTests
             out var request));
 
         Assert.Equal(expected, request!.Kind);
+    }
+
+    [Theory]
+    [InlineData("Daily")]
+    [InlineData("Weekly")]
+    [InlineData("Once")]
+    public void Meeting_parser_allows_a_named_schedule_to_start_with_a_frequency_keyword(string name)
+    {
+        Assert.True(MeetingCommandParser.TryParse(
+            [name, "04/10/2026", "18:30", "once"],
+            out var request));
+
+        Assert.Equal(name, request!.Name);
+        Assert.Equal(MeetingScheduleKind.Once, request.Kind);
+        Assert.Equal("04/10/2026 18:30", request.WhenText);
     }
 
     [Fact]
@@ -300,6 +333,27 @@ public class DomainRulesTests
     }
 
     [Fact]
+    public void Top_level_summary_uses_the_meeting_bucket_instead_of_the_ai_bucket()
+    {
+        var limiter = new MonzeCommandRateLimiter(new MonzeRateLimitOptions(
+            UserLimit: 8,
+            UserWindow: TimeSpan.FromSeconds(10),
+            AiLimit: 5,
+            AiWindow: TimeSpan.FromMinutes(1),
+            MeetingLimit: 1,
+            MeetingWindow: TimeSpan.FromSeconds(10),
+            AdminLimit: 5,
+            AdminWindow: TimeSpan.FromMinutes(1),
+            MaxEntries: 100));
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Summary, now, out _));
+        Assert.False(limiter.TryAcquire(1, 10, MonzeCommandNames.Summary, now, out _));
+        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Ai, now, out _));
+        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Ai, now, out _));
+    }
+
+    [Fact]
     public void Command_rate_limiter_reuses_typed_key_without_hotpath_allocation()
     {
         var limiter = new MonzeCommandRateLimiter(new MonzeRateLimitOptions(
@@ -336,9 +390,8 @@ public class DomainRulesTests
         Assert.Equal(RoleRuleKind.OnJoin, join);
         Assert.False(RoleRules.TryParseKind("points", out _));
         Assert.False(RoleRules.TryParseKind("min_points", out _));
-        Assert.Equal("existing_role", RoleRules.ToStorageName(RoleRuleKind.ExistingRole));
-        Assert.True(RoleRules.MatchesExistingRole(new HashSet<long> { 7, 11 }, 11));
-        Assert.False(RoleRules.MatchesExistingRole(new HashSet<long> { 7 }, 11));
+        Assert.False(RoleRules.TryParseKind("self_select", out _));
+        Assert.False(RoleRules.TryParseKind("existing_role", out _));
     }
 
     [Fact]

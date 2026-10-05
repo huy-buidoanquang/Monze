@@ -150,6 +150,15 @@ ORDER BY status;
 '@ @{ clan = $ClanId })
     Add-InspectionRows $commandInbox
 
+    $interactionInbox = @(Invoke-InspectionQuery $connection 'interaction_inbox' @'
+SELECT status, count(*) AS rows
+FROM interaction_inbox
+WHERE clan_id = @clan
+GROUP BY status
+ORDER BY status;
+'@ @{ clan = $ClanId })
+    Add-InspectionRows $interactionInbox
+
     $outbox = @(Invoke-InspectionQuery $connection 'outbox' @'
 SELECT kind, status, count(*) AS rows
 FROM outbox_delivery
@@ -188,7 +197,8 @@ FROM unnest(ARRAY[
     'clan_registry', 'clan_settings', 'clan_admin', 'channel_policy',
     'ai_usage', 'role_rule', 'role_grant', 'meeting_session',
     'voice_claim', 'meeting_summary', 'meeting_schedule', 'agent_event',
-    'inbox_event', 'command_inbox', 'outbox_delivery', 'schema_migrations'
+    'inbox_event', 'command_inbox', 'interaction_inbox', 'outbox_delivery',
+    'schema_migrations'
 ]::text[]) AS names(name)
 ORDER BY name;
 '@)
@@ -220,7 +230,7 @@ WHERE clan_id = @clan AND channel_id = @channel;
         if ($roleMigration.Count -ne 1) {
             throw "DB assertion failed: migration 007_roles is not applied."
         }
-        foreach ($migrationVersion in @('008_topic_prompts', '009_wheel_cooldown', '010_role_rule_conditions', '011_meeting_summary_retry', '012_meeting_request_cleanup', '013_meeting_summary_leases', '014_command_inbox', '015_event_capacity', '017_meeting_schedule_details', '018_remove_community_features', '019_meeting_invitation_delivery', '020_role_automation', '021_agent_summary_binding')) {
+        foreach ($migrationVersion in @('008_topic_prompts', '009_wheel_cooldown', '010_role_rule_conditions', '011_meeting_summary_retry', '012_meeting_request_cleanup', '013_meeting_summary_leases', '014_command_inbox', '015_event_capacity', '016_welcome_embed', '017_meeting_schedule_details', '018_remove_community_features', '019_meeting_invitation_delivery', '020_role_automation', '021_agent_summary_binding', '022_meeting_text_channel_delivery', '023_user_profile', '024_meeting_summary_transcript_delivery', '025_meeting_agent_cycles', '026_remove_retired_role_rules', '027_interaction_inbox', '028_agent_event_scope')) {
             $migration = @($migrations | Where-Object { [string]$_.version -like "*$migrationVersion" })
             if ($migration.Count -ne 1) {
                 throw "DB assertion failed: migration $migrationVersion is not applied."

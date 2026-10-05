@@ -19,8 +19,8 @@ Build xanh, HTTP 200 hoặc unit test pass riêng lẻ không đủ để đóng
 
 Phạm vi gồm source hiện tại của `F:/projects/mezon/Monze`:
 
-- 178 file C# trong solution.
-- 23 migration SQL.
+- 248 file C# trong solution.
+- 28 migration SQL.
 - Domain, Application, Infrastructure, runtime `MonzeBot`, UI builders, workers, tests và benchmarks.
 - Mezon SDK, PostgreSQL, Redis, SQLite history facade, Agent SSE, transcript client và AI provider.
 
@@ -60,18 +60,22 @@ Trước khi viết test chi tiết, phải xuất inventory từ:
 - Event subscriptions trong `MonzeBot`.
 - Hosted workers.
 - Application repository interfaces.
-- PostgreSQL tables/migrations và cache keys.
+- PostgreSQL tables/migrations `001`–`027` và cache keys.
 
-### Contract drift cần quyết định trước release
+### Contract role đã khóa
 
-`RoleRuleKind` và `IAuthorizationRepository` hiện còn các khái niệm self-select/existing-role, nhưng command router, help và `MonzeApp.Roles` hiện chưa cung cấp đầy đủ public flow tương ứng.
+Role automation chỉ hỗ trợ `on_join` và `tenure`. `self_select` và
+`existing_role` đã được loại khỏi enum, repository contract và parser; migration
+`026_remove_retired_role_rules.sql` xóa dữ liệu cũ. Regression test phải chứng
+minh hai tên storage đã retired không được parse hoặc route trở lại.
 
-Phải chọn một trong hai hướng:
+State-changing meeting interactions dùng `027_interaction_inbox.sql`. Duplicate
+`start now` hoặc submit lịch hợp lệ trên cùng source message/action phải chỉ có một
+lease; trạng thái `completed` và `uncertain` không được tự reclaim.
 
-1. Implement đầy đủ command, authorization, gateway, persistence và end-to-end tests; hoặc
-2. Tuyên bố retired rõ ràng, loại khỏi public contract/schema kỳ vọng và thêm regression test chứng minh không còn route.
-
-Không dùng test domain riêng lẻ để tuyên bố capability public đã hoạt động.
+Agent event dùng `028_agent_event_scope.sql` để dọn dữ liệu global cũ, bắt buộc unique
+`(room_id, event_type)` và chỉ claim inbox sau khi voice channel đã được xác minh thuộc
+một clan Monze đang biết.
 
 ## 4. Quality gates
 
@@ -94,9 +98,9 @@ Không dùng test domain riêng lẻ để tuyên bố capability public đã ho
 | AI | Summary/translate/composer/simplify, reply history, input limit, concurrency, budget, gap note | Fake provider + atomic budget + message-history replay | Không gọi provider khi validation/concurrency/budget reject; budget atomic; history gap được thông báo |
 | Avatar/profile | Self, mention, username, reply target, profile upsert và label priority | SDK directory fake + profile repository + cross-clan tests | Username/reply từ clan khác không resolve; missing avatar là response bình thường |
 | Meeting/schedule | List/now/cancel, once/daily/weekly, timezone, occupancy, voice claim, schedule worker | Domain/property + repository concurrency + SDK event replay + live smoke | Chỉ suggest voice empty/unclaimed; cancel đúng requester/channel/clan; recurring lease replay idempotent |
-| Agent/summary | Start/end/summary, room binding, duplicate inbox, pending retry, stored summary, admin lookup | SSE replay + PostgreSQL lease + transcript fault + end-to-end meeting | Một logical meeting tối đa một summary; không cross-channel reply target; retry không tạo bản thứ hai |
+| Agent/summary | Start/end/summary, room binding, duplicate inbox, pending retry, stored summary, admin lookup | SSE replay + PostgreSQL lease + transcript fault + end-to-end meeting | Mỗi Agent room tạo đúng một session/summary; một cuộc họp có thể có nhiều chu kỳ Agent nhưng tất cả cùng reply invitation; không cross-channel reply target |
 | Ingress/lifecycle | Bounded queue, ordering, backpressure, channel/voice events, discovery, reconnect, shutdown | Queue stress/property + SDK recorder + reconnect injection + metrics/log assertions | Callback bounded; per-key ordering; capacity cố định; reconnect không mất clan hoặc nhân subscription |
-| Outbox/cache/migration | Claim/lease/reclaim/uncertain, L1/L2 versioning, tombstone, Pub/Sub, migrations 001–023 | Concurrent SQL + Redis fault + migration matrix + fake transport | Chỉ lease hiện tại complete; uncertain không blind resend; Redis không phải authority; migration checksum-safe |
+| Outbox/cache/migration | Claim/lease/reclaim/uncertain, L1/L2 versioning, tombstone, Pub/Sub, migrations 001–026 | Concurrent SQL + Redis fault + migration matrix + fake transport | Chỉ lease hiện tại complete; uncertain không blind resend; Redis không phải authority; migration checksum-safe |
 
 ## 6. Scenario bắt buộc
 
@@ -169,6 +173,11 @@ Không dùng test domain riêng lẻ để tuyên bố capability public đã ho
 ### 6.6 Agent, outbox và recovery
 
 - Agent duplicate, out-of-order, malformed payload và unmatched room.
+- Tắt/bật Agent nhiều lần khi voice vẫn còn người: mỗi room có session/summary riêng nhưng cùng text channel và invitation reply target.
+- Summary hoàn tất trước ACK của invitation không được claim; ACK phải backfill cùng reply target cho summary và action items.
+- JSON summary đã lưu ở dạng room object phải dựng lại được đầy đủ khi dùng `*summary <id>`.
+- Meeting có thời lượng dương dưới một phút phải hiển thị tối thiểu `1 phút`, không hiển thị `0 phút`.
+- Voice empty, voice ended và realtime reconnect đóng context theo policy; Agent cycle sau đó không được tái sử dụng invitation đã đóng.
 - Transcript empty/timeout/error.
 - Outbox current lease, wrong token, expired reclaim.
 - Retry backoff.
@@ -298,7 +307,8 @@ Nếu thiếu bất kỳ bằng chứng nào, trạng thái bắt buộc là:
 
 ## 13. Baseline hiện tại
 
-- Release test runner hiện báo `99/99`.
+- Release test runner hiện báo `200/200`, `0` fail, `0` skip khi bật PostgreSQL integration và Redis integration trên bộ Mezon.Net 1.6.2. TRX mới nhất là `Monze.Tests/TestResults/20261004-agent-participant-full.trx`; live smoke và full-stack capacity gate vẫn là lớp bằng chứng riêng. Ba test transcript chứng minh timeout áp dụng cho toàn bộ thao tác, caller cancellation vẫn được truyền lên và lỗi transport tạm thời vẫn retry thành công. Test lease chứng minh worker claim từng summary ngay trước khi xử lý thay vì giữ trước 32 lease trong vòng lặp tuần tự. Test clan join chứng minh pass sau discovery chỉ còn clan lỗi hoặc mới. Agent scope tests chứng minh event chỉ được nhận cho voice channel thuộc clan đã biết, payload clan mismatch bị từ chối, lỗi lookup cố định không bị retry, và duplicate `ended` đồng thời chỉ tạo một pending transition. Multi-account Agent test chứng minh summary reply vào invitation tại text channel, giữ `@here`, đóng voice claim sau khi cả hai client rời phòng, loại numeric KOMU Agent khỏi danh sách người tham gia và không bịa thời lượng `1 giây` cho duration bằng 0. Nhóm 43 test HTTP transcript, worker, Agent scope và PostgreSQL meeting/outbox đã pass 20 lượt liên tiếp, tổng cộng `860/860` case executions trong `docs/test-artifacts/20261004-agent-meeting-critical-repeat.json`; boundary voice-profile mới pass 20 lượt, tổng cộng `40/40` case executions.
+- Inventory hiện có `37` TEST-ID duy nhất. Mỗi command, interaction, event, worker, durable port và migration surface đều có owner và expected result; các dòng thiếu live/fault/concurrency evidence được ghi rõ bằng `remainingGap`.
+- Lần thử thu coverage không tạo được số liệu vì test project không cài `XPlat Code Coverage` collector. Không dùng lần chạy đó để đưa ra claim coverage.
 - Đây là baseline của test suite hiện có, không phải bằng chứng đầy đủ cho runtime, Redis, Mezon, Agent, PostgreSQL concurrency hoặc production capacity.
 - Các thay đổi chưa commit trong working tree được giữ nguyên; kế hoạch này không tự ý sửa code.
-

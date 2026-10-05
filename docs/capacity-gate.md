@@ -151,3 +151,131 @@ Event capacity and waitlist are transactionally enforced; the PostgreSQL integra
 
 - The current Release process answered `*monze help` in Chrome after the benchmark. The embed and three help navigation buttons rendered without browser errors.
 - The process remained live with the Redis/WebSocket startup state intact; PostgreSQL assertion passed.
+
+## Current SDK 1.6.2 gate (2026-10-02)
+
+- Release build: 0 warnings, 0 errors. PostgreSQL and real two-instance Redis suite:
+  `196/196`, with 0 failed and 0 skipped. The focused transcript, meeting, Agent
+  scope and outbox group passed `43/43` with PostgreSQL enabled, including the
+  summary-before-invitation-ACK race, direct-Agent delivery branch and concurrent
+  duplicate-ended transition.
+- Two caller-free meeting bind repository APIs and their syntax-only PostgreSQL test
+  were removed after a complete caller trace. Runtime Agent binding continues through
+  the clan-scoped transactional `BindAgentSessionAsync` path.
+- Two additional caller-free repository ports, `LatestPostedSummaryAsync` and
+  `SetWelcomeEmbedAsync`, were removed. The post-cleanup checkpoint was `173/173` in
+  `docs/test-artifacts/20261002-repository-port-cleanup-full.trx`.
+
+### Multi-account Agent continuation (2026-10-04)
+
+- The current PostgreSQL/Redis Release suite passes `200/200`, with 0 failed and
+  0 skipped, in `Monze.Tests/TestResults/20261004-agent-participant-full.trx`.
+- A live two-account Agent cycle produced posted session `3620`, two sent reply-bound
+  summary deliveries, preserved the visible `@here` invitation, and left no voice
+  claim after both clients disconnected.
+- The live payload exposed the numeric KOMU Agent identity in `speech_durations`.
+  Monze now excludes that identity and the `agent-e...` identity family from human
+  participant/action output and renders a true zero speech duration as `0 giây`.
+- Voice profile synchronization uses the existing bounded meeting queue. Its
+  item-creation and `TryWrite`/`TryRead` boundary measured 0 B after warmup and passed
+  20 consecutive two-test runs (`40/40`). This is a focused allocation gate, not a
+  complete 1,000-clan capacity result.
+- Evidence: `docs/test-artifacts/20261004-multispeaker-agent-summary-verification.md`.
+- Transcript fetching now applies the configured 30-second HTTP timeout to the whole
+  authentication, retry and fetch operation. The Agent callback no longer wraps the
+  client's three bounded attempts in another three-attempt loop. A deterministic red
+  test first escaped after 958.1909 ms; the fixed test returned `null` after 59.9263 ms,
+  caller cancellation still propagated and transient transport recovery still passed.
+  That timeout checkpoint was `176/176` in
+  `docs/test-artifacts/20261002-transcript-timeout-full.trx`.
+- The meeting schedule codec regression passed `3/3`; the final browser run retained
+  the native date picker and successfully submitted `HH:mm` through the text input.
+- Migration `027_interaction_inbox` replayed twice. Migration
+  `028_agent_event_scope` was applied and replayed successfully; schema inspection
+  passed with all 28 checksums. Concurrent duplicate interaction claims yielded one
+  lease, completed and uncertain rows rejected replay, and the Agent pending-event
+  key is unique by `(room_id, event_type)`.
+- BenchmarkDotNet measured the isolated bounded ingress operation at `27.4787 ns/op`
+  with no managed allocation. A 30-second in-process profile at 1,000 registered
+  clans, 100 active clans, 200 messages/s, 20 commands/s, 100 meeting candidates and
+  200 outbox items/s completed with zero drops/rejects; maximum ingress and outbox
+  depth were 4 and 5. The measured heap maximum was 2,867,528 bytes, RSS maximum was
+  38,387,712 bytes and the harness reported no Gen0/Gen1/Gen2 collections.
+- A separate 19-second series after final-binary Chrome and database work recorded
+  working set `110,358,528–111,030,272` bytes, private bytes
+  `36,511,744–37,146,624` and only `0.015625` CPU seconds of change. It is a short
+  stability observation, not the required full-stack soak.
+- The final post-cleanup runtime (PID `23212`) rejoined five clans with empty stderr.
+  A separate 19-second idle sample recorded working set
+  `88,104,960–97,460,224` bytes, private bytes `26,050,560–35,471,360` and
+  `0.109375` CPU seconds of change. This sample is diagnostic evidence only.
+- The 14 critical PostgreSQL meeting/Agent/outbox cases then passed 20 consecutive
+  runs (280 case executions, zero failures) with the live worker stopped. PID `19072`
+  restarted the same Release binary afterward, rejoined five clans and passed the
+  database assertion with empty stderr.
+- The eight transcript HTTP cases and 14 critical PostgreSQL cases subsequently
+  passed 20 combined runs: 440 case executions with zero failures. The latest Release
+  process, PID `13064`, connected Redis and WebSocket, rejoined five clans, passed the
+  database assertion and has empty stderr. These checks prove bounded client behavior
+  and a clean startup; they do not constitute a live external timeout/recovery replay.
+- A 20-sample, 19-second observation of PID `13064` recorded working set
+  `95,625,216–96,366,592` bytes, private bytes `31,576,064–32,559,104`, 26–27
+  threads and `0.03125` CPU seconds of change. Artifact:
+  `docs/test-artifacts/20261002-summary-timeout-resource-sample.json`. It is an idle
+  stability sample, not a soak or capacity result.
+- The maintenance worker previously claimed up to 32 60-second summary leases before
+  processing them sequentially. A regression test first observed `LIMIT 32`; the
+  worker now claims one row immediately before processing while retaining the 32-item
+  cycle cap. That checkpoint was `177/177` in
+  `docs/test-artifacts/20261002-summary-lease-full.trx`. The transcript, lease and 14
+  critical PostgreSQL cases passed 20 combined runs: 460 case executions, zero
+  failures. PID `39592` runs that Release binary, rejoined five clans and has empty
+  stderr.
+- A 20-sample, 19-second observation of PID `39592` recorded working set
+  `85,319,680–86,343,680` bytes, private bytes `24,547,328–25,513,984`, 37–38
+  threads and `0.015625` CPU seconds of change. Artifact:
+  `docs/test-artifacts/20261002-summary-lease-resource-sample.json`.
+- Monze startup previously joined every stored clan before discovery and then joined
+  the merged registry again. It now records successful first-pass joins and performs
+  the second pass only for failed or newly discovered clan IDs. Reconnect still joins
+  the complete durable registry, preserving clans beyond the backend list cap. The
+  current suite is `178/178` in
+  `docs/test-artifacts/20261002-clan-join-plan-final-full.trx`; live PID `21972`
+  emitted exactly one Monze join batch (`5/5`) before discovery, then no duplicate
+  Monze batch afterward. SDK-internal seeding remains a separate upstream behavior.
+- PID `21972` rejoined the current registry with empty stderr and a passing database
+  assertion. Its 20-sample, 19-second observation recorded working set
+  `85,204,992–88,215,552` bytes, private bytes `23,572,480–26,578,944`, 36–37
+  threads and `0.046875` CPU seconds of change. Artifact:
+  `docs/test-artifacts/20261002-clan-join-resource-sample.json`.
+- Summary maintenance now uses four fixed lanes. Each lane claims one row immediately
+  before processing, while the shared cycle budget remains 32 rows. A PostgreSQL
+  integration test verified four concurrent `FOR UPDATE SKIP LOCKED` claims returned
+  four distinct rooms and lease tokens. That concurrency checkpoint passed `180/180` in
+  `docs/test-artifacts/20261002-summary-concurrency-final-full.trx`; the 25-case
+  transcript/worker/PostgreSQL group passed 20 runs, `500/500` executions, in
+  `docs/test-artifacts/20261002-summary-concurrency-race-repeat.json`.
+- Agent ingress now rejects global SSE events before durable inbox claim unless the
+  resolved channel is a voice channel in the durable known-clan set. Fixed lookup
+  failures stop after one request; only transient failures retry. The post-build
+  PostgreSQL/Redis suite passed `196/196`, and the 43-case critical group passed 20
+  runs (`860/860`) in
+  `docs/test-artifacts/20261004-agent-meeting-critical-repeat.json`. The final DB
+  inspection retained zero Agent inbox rows, zero pending Agent rows and zero duplicate
+  pending keys after the tests.
+- PID `27144` selected a connected Redis cache, connected the dev WebSocket, joined
+  five stored clans in one batch and produced zero warnings, failures or stderr during
+  the recorded canary window. A 20-sample, 19-second observation recorded working set
+  `94,851,072–104,038,400` bytes, private bytes `32,137,216–40,382,464`, 24–28
+  threads, 613–637 handles and `0.234375` CPU seconds of change. Working set decreased
+  in three intervals and private bytes ended only 188,416 bytes above the first sample;
+  this remains a short diagnostic sample rather than a soak.
+- Final PID `30088` connected Redis and WebSocket, emitted one successful `5/5` Monze
+  join batch, and had empty stderr. A 20-sample, 19-second observation recorded
+  working set `84,996,096–88,375,296` bytes, private bytes
+  `23,773,184–26,861,568`, 36–37 threads, 671–676 handles and `0.0625` CPU seconds
+  of change. Artifact:
+  `docs/test-artifacts/20261002-summary-concurrency-final-resource-sample.json`.
+- The gate remains open for a two-hour complete-process workload with PostgreSQL,
+  Redis, Mezon socket, Agent, external delivery, reconnect, rate-limit and p99
+  telemetry. No production 1,000-clan or whole-stack zero-allocation claim is made.

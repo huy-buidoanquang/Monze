@@ -12,4 +12,7 @@ public sealed record DueOutbox(
     bool MentionEveryone = false,
     string? ContentJson = null,
     long? MeetingSessionId = null,
-    long? ReplyToMessageId = null);
+    long? ReplyToMessageId = null,
+    bool? ReplyDirectAgent = null,
+    long? ReplyVoiceChannelId = null,
+    string? ReplyVoiceChannelLabel = null);

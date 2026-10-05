@@ -71,10 +71,27 @@ ORDER BY id DESC;
     'Sessions'
     Invoke-Query $connection @'
 SELECT id, status, voice_channel_id, text_channel_id, requester_id,
-       notification_channel_id, notification_message_id, claim_until, ended_at
+       notification_channel_id, notification_message_id, source_message_id,
+       root_session_id, room_id, started_at, ended_at, context_closed_at,
+       claim_until, summary_attempts, summary_next_attempt_at,
+       summary_last_error
 FROM meeting_session
 WHERE clan_id = @clan
 ORDER BY id DESC
+LIMIT 20;
+'@ @{ clan = $ClanId }
+
+    'Summaries'
+    Invoke-Query $connection @'
+SELECT ms.session_id, s.room_id, s.ended_at,
+       length(ms.summary_text) AS summary_length,
+       length(ms.transcript) AS transcript_length,
+       ms.full_transcript IS NOT NULL AS has_full_transcript,
+       ms.posted
+FROM meeting_summary ms
+JOIN meeting_session s ON s.id = ms.session_id
+WHERE s.clan_id = @clan
+ORDER BY ms.session_id DESC
 LIMIT 20;
 '@ @{ clan = $ClanId }
 
@@ -84,7 +101,8 @@ SELECT id, kind, status, channel_id, mention_everyone,
        content_json IS NOT NULL AS has_content_json,
        position('@here' in COALESCE(content_json, '')) > 0 AS content_has_here,
        position('ChromeDue' in COALESCE(content_json, '')) > 0 AS content_has_test_title,
-       external_message_id, attempts, due_at, last_error
+       external_message_id, meeting_session_id, reply_to_message_id,
+       attempts, due_at, last_error
 FROM outbox_delivery
 WHERE clan_id = @clan
 ORDER BY id DESC

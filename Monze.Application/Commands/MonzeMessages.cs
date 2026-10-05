@@ -29,6 +29,7 @@ public static class MonzeMessages
     public const string DelegateRemoved = "Đã xóa người được ủy quyền.";
     public const string DelegateAlreadyExists = "Người này đã được ủy quyền trước đó.";
     public const string DelegateNotFound = "Người này không có trong danh sách ủy quyền.";
+    public const string DelegateMustBeClanMember = "Chỉ có thể thêm thành viên hiện đang thuộc clan làm admin.";
     public const string VoiceClaimConflict = "Phòng voice vừa được giữ bởi meeting khác. Hãy thử lại sau.";
     public const string MeetingAgentInstruction = "Hãy bật Agent để bắt đầu tóm tắt cuộc hội thoại. Kết quả sẽ được gửi về sau khi cuộc hội thoại kết thúc.";
     public const string InvalidTime = "Thời điểm không hợp lệ.";
@@ -36,6 +37,7 @@ public static class MonzeMessages
     public const string MeetingScheduleCancelled = "Đã hủy lịch họp.";
     public const string MeetingScheduleEmpty = "Chưa có lịch họp đang chờ trong kênh này.";
     public const string NoSummary = "Chưa có kết quả summary cho phòng này.";
+    public const string SummaryFailed = "Không thể lấy bản tóm tắt sau nhiều lần thử. Hãy bật Agent lại hoặc tra cứu lại sau khi có dữ liệu.";
     public const string SummaryAdminOnly = "Chỉ owner hoặc admin mới được tra cứu summary.";
     public const string WelcomeEnabled = "Đã bật welcome.";
     public const string WelcomeDisabled = "Đã tắt welcome.";
@@ -75,9 +77,6 @@ public static class MonzeMessages
         DateTimeOffset next)
         => $"Đã lưu lịch \"{name}\" (#{id}), kiểu {kind.ToString().ToLowerInvariant()}, lần tới {next:dd/MM/yyyy HH:mm} UTC.";
 
-    public static string RoleSelfAssignableChanged(bool enabled, string label)
-        => enabled ? $"Đã cho phép tự chọn role {label}." : $"Đã tắt tự chọn role {label}.";
-
     public static string UnknownCommand(MonzeCommandOptions options)
         => $"Lệnh không rõ. Gõ {options.HelpCommand}.";
 
@@ -92,4 +91,3 @@ public static class MonzeMessages
     public static string RateLimited(TimeSpan retryAfter)
         => $"Bạn thao tác quá nhanh. Hãy thử lại sau {Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))} giây.";
 }
-

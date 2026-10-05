@@ -66,6 +66,19 @@ public sealed class MeetingUiTests
     }
 
     [Fact]
+    public void Meeting_schedule_form_keeps_date_picker_and_uses_text_for_clock_input()
+    {
+        var root = JsonDocument.Parse(MonzeMessageBuilder.MeetingScheduleForm().RawJson).RootElement;
+        var fields = root.GetProperty("embed")[0].GetProperty("fields");
+        var date = fields.EnumerateArray().Single(field => field.GetProperty("name").GetString() == "Ngày");
+        var time = fields.EnumerateArray().Single(field => field.GetProperty("name").GetString() == "Giờ");
+
+        Assert.Equal((int)Mezon.Net.Client.MessageComponentType.DatePicker, date.GetProperty("inputs").GetProperty("type").GetInt32());
+        Assert.Equal((int)Mezon.Net.Client.MessageComponentType.Input, time.GetProperty("inputs").GetProperty("type").GetInt32());
+        Assert.Equal("text", time.GetProperty("inputs").GetProperty("component").GetProperty("type").GetString());
+    }
+
+    [Fact]
     public void Meeting_invitation_keeps_channel_link_and_optional_topic_embed()
     {
         var content = MonzeMessageBuilder.MeetingInvitation(
@@ -123,6 +136,71 @@ public sealed class MeetingUiTests
         Assert.Equal(41, root.GetProperty("hg")[0].GetProperty("e").GetInt32());
         Assert.True(
             MonzeEmbedColors.IsInformational(root.GetProperty("embed")[0].GetProperty("color").GetString()!));
+    }
+
+    [Fact]
+    public void Meeting_summary_messages_use_the_requested_titles_and_two_payloads()
+    {
+        var delivery = MonzeMessageBuilder.MeetingSummaryMessages(
+            new MeetingSummaryPresentation(
+                "TÓM TẮT HỘI THOẠI #42 (🔊 voice-room)",
+                "CÁC ĐẦU MỤC CÔNG VIỆC #42 (🔊 voice-room)",
+                "Thứ 5, ngày 01 tháng 10 năm 2026\nCuộc hội thoại diễn ra trong 30 phút. 04:10 PM - 04:40 PM",
+                "- Clan Nick: 2 phút (50%)",
+                "Nội dung",
+                "https://mezon.ai/developers/transcript-calls/room-1",
+                [new MeetingSummaryActionItem("Clan Nick", "1. Việc cần làm")]),
+            replyToMessageId: 99);
+
+        var summary = JsonDocument.Parse(delivery.SummaryContentJson).RootElement;
+        var actions = JsonDocument.Parse(delivery.ActionItemsContentJson).RootElement;
+
+        Assert.Equal(
+            "TÓM TẮT HỘI THOẠI #42 (🔊 voice-room)",
+            summary.GetProperty("embed")[0].GetProperty("title").GetString());
+        Assert.Equal(
+            "CÁC ĐẦU MỤC CÔNG VIỆC #42 (🔊 voice-room)",
+            actions.GetProperty("embed")[0].GetProperty("title").GetString());
+        Assert.Equal("Người tham gia", summary.GetProperty("embed")[0].GetProperty("fields")[0].GetProperty("name").GetString());
+        Assert.Equal("Clan Nick", actions.GetProperty("embed")[0].GetProperty("fields")[0].GetProperty("name").GetString());
+        Assert.Equal(
+            summary.GetProperty("embed")[0].GetProperty("description").GetString(),
+            actions.GetProperty("embed")[0].GetProperty("description").GetString());
+        Assert.Equal(99, summary.GetProperty("rpl").GetInt64());
+        Assert.False(actions.TryGetProperty("rpl", out _));
+        Assert.True(MonzeEmbedColors.IsInformational(summary.GetProperty("embed")[0].GetProperty("color").GetString()!));
+        Assert.True(MonzeEmbedColors.IsInformational(actions.GetProperty("embed")[0].GetProperty("color").GetString()!));
+    }
+
+    [Fact]
+    public void Agent_status_update_keeps_voice_link_and_here_update_metadata()
+    {
+        var content = MonzeMessageBuilder.MeetingAgentStatus(
+            new MeetingSessionBinding(7, 1, 2, 42, false, 9, 2, null, "voice-room"),
+            summarizing: false);
+        var root = JsonDocument.Parse(content.RawJson).RootElement;
+
+        Assert.Equal("@here Mọi người tham gia phòng voice-room để bắt đầu cuộc hội thoại.", root.GetProperty("t").GetString());
+        Assert.Equal(1, root.GetProperty("hg").GetArrayLength());
+        Assert.Equal(31, root.GetProperty("hg")[0].GetProperty("s").GetInt32());
+        Assert.Equal(41, root.GetProperty("hg")[0].GetProperty("e").GetInt32());
+        var here = Assert.Single(MonzeMentionMetadata.Here);
+        Assert.Equal(1775731111020111321L, here.UserId);
+        Assert.Equal(0, here.S);
+        Assert.Equal(5, here.E);
+    }
+
+    [Fact]
+    public void Agent_status_preserves_invitation_text_and_changes_only_the_embed_payload()
+    {
+        var content = MonzeMessageBuilder.MeetingAgentStatus(
+            new MeetingSessionBinding(7, 1, 2, 42, false, 9, 2, "Sprint Review", "voice-room"),
+            summarizing: true);
+        var root = JsonDocument.Parse(content.RawJson).RootElement;
+
+        Assert.Equal("@here Mọi người tham gia phòng voice-room để bắt đầu cuộc hội thoại.", root.GetProperty("t").GetString());
+        Assert.Equal("Mezon Agent", root.GetProperty("embed")[0].GetProperty("title").GetString());
+        Assert.Contains("Đang tóm tắt", root.GetProperty("embed")[0].GetProperty("fields")[0].GetProperty("value").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]

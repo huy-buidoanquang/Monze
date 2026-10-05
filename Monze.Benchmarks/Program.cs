@@ -1,5 +1,11 @@
 using BenchmarkDotNet.Running;
 
+if (args.Length > 0 && args[0].Equals("--soak", StringComparison.OrdinalIgnoreCase))
+{
+    await CapacitySoakRunner.RunAsync(args[1..]);
+    return;
+}
+
 BenchmarkSwitcher
     .FromAssembly(typeof(MonzeHotPathBenchmarks).Assembly)
     .Run(args);

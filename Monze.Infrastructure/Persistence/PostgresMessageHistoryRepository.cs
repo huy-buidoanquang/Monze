@@ -19,19 +19,26 @@ public sealed class PostgresMessageHistoryRepository : IMessageHistoryRepository
         return await command.ExecuteScalarAsync(cancellationToken) as bool? ?? false;
     }
 
-    public async Task NoteMessageAsync(long clanId, long channelId, long messageId, bool gap, CancellationToken cancellationToken)
+    public async Task MarkChannelGapAsync(
+        long clanId,
+        long channelId,
+        long messageId,
+        CancellationToken cancellationToken)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
-            INSERT INTO channel_policy(clan_id, channel_id, persist_messages, last_message_id, has_gap)
-            VALUES (@clan, @channel, TRUE, @message, @gap)
-            ON CONFLICT (clan_id, channel_id) DO UPDATE
-            SET last_message_id = EXCLUDED.last_message_id, has_gap = channel_policy.has_gap OR EXCLUDED.has_gap;
+            UPDATE channel_policy
+            SET last_message_id = GREATEST(
+                    COALESCE(last_message_id, @message),
+                    @message),
+                has_gap = TRUE
+            WHERE clan_id = @clan
+              AND channel_id = @channel
+              AND persist_messages;
             """, connection);
         command.Parameters.AddWithValue("clan", clanId);
         command.Parameters.AddWithValue("channel", channelId);
         command.Parameters.AddWithValue("message", messageId);
-        command.Parameters.AddWithValue("gap", gap);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 

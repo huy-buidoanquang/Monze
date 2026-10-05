@@ -8,7 +8,9 @@ public interface ICommandInboxRepository
         long messageId,
         CancellationToken cancellationToken);
 
-    Task CompleteAsync(CommandInboxLease lease, CancellationToken cancellationToken);
+    Task<bool> CompleteAsync(CommandInboxLease lease, CancellationToken cancellationToken);
+
+    Task<bool> MarkUncertainAsync(CommandInboxLease lease, CancellationToken cancellationToken);
 
     Task ReleaseAsync(CommandInboxLease lease, CancellationToken cancellationToken);
 

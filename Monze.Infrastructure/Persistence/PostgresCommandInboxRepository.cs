@@ -30,7 +30,7 @@ public sealed class PostgresCommandInboxRepository : ICommandInboxRepository
                 locked_until = now() + interval '60 seconds',
                 received_at = now(),
                 completed_at = NULL
-            WHERE command_inbox.status <> 'completed'
+            WHERE command_inbox.status = 'processing'
               AND command_inbox.locked_until <= now()
             RETURNING clan_id, channel_id, message_id, lease_token;
             """, connection);
@@ -50,23 +50,11 @@ public sealed class PostgresCommandInboxRepository : ICommandInboxRepository
             reader.GetString(3));
     }
 
-    public async Task CompleteAsync(CommandInboxLease lease, CancellationToken cancellationToken)
-    {
-        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
-        await using var command = new NpgsqlCommand("""
-            UPDATE command_inbox
-            SET status = 'completed',
-                completed_at = now(),
-                locked_until = now()
-            WHERE clan_id = @clan
-              AND channel_id = @channel
-              AND message_id = @message
-              AND status = 'processing'
-              AND lease_token = @lease;
-            """, connection);
-        AddLeaseParameters(command, lease);
-        await command.ExecuteNonQueryAsync(cancellationToken);
-    }
+    public Task<bool> CompleteAsync(CommandInboxLease lease, CancellationToken cancellationToken)
+        => FinishAsync(lease, "completed", cancellationToken);
+
+    public Task<bool> MarkUncertainAsync(CommandInboxLease lease, CancellationToken cancellationToken)
+        => FinishAsync(lease, "uncertain", cancellationToken);
 
     public async Task ReleaseAsync(CommandInboxLease lease, CancellationToken cancellationToken)
     {
@@ -93,6 +81,28 @@ public sealed class PostgresCommandInboxRepository : ICommandInboxRepository
             """, connection);
         command.Parameters.AddWithValue("before", before);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task<bool> FinishAsync(
+        CommandInboxLease lease,
+        string status,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            UPDATE command_inbox
+            SET status = @status,
+                completed_at = now(),
+                locked_until = now()
+            WHERE clan_id = @clan
+              AND channel_id = @channel
+              AND message_id = @message
+              AND status = 'processing'
+              AND lease_token = @lease;
+            """, connection);
+        command.Parameters.AddWithValue("status", status);
+        AddLeaseParameters(command, lease);
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
     private static void AddLeaseParameters(NpgsqlCommand command, CommandInboxLease lease)

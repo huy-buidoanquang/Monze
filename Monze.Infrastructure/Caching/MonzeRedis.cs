@@ -27,8 +27,11 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
     private readonly string _prefix;
     private readonly string _publisherId = Guid.NewGuid().ToString("N");
     private readonly Action<RedisChannel, RedisValue> _invalidationHandler;
+    private readonly EventHandler<ConnectionFailedEventArgs> _connectionFailedHandler;
+    private readonly EventHandler<ConnectionFailedEventArgs> _connectionRestoredHandler;
     private readonly ILogger<MonzeReadModelCache> _logger;
     private long _redisRetryAfterMilliseconds;
+    private int _redisHealthy;
 
     public MonzeReadModelCache(
         IConnectionMultiplexer multiplexer,
@@ -42,12 +45,15 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
         _logger = logger;
         _prefix = $"monze:v1:{environment}:{botId}:";
         _invalidationHandler = (_, value) => InvalidateLocal(value);
-        _subscriber.Subscribe(
-            RedisChannel.Literal(_prefix + InvalidationSuffix),
-            _invalidationHandler);
+        _connectionFailedHandler = (_, _) => MarkRedisFailure();
+        _connectionRestoredHandler = (_, _) => _ = SubscribeToInvalidationsAsync();
+        _multiplexer.ConnectionFailed += _connectionFailedHandler;
+        _multiplexer.ConnectionRestored += _connectionRestoredHandler;
+        _ = SubscribeToInvalidationsAsync();
     }
 
-    public bool IsConnected => _multiplexer.IsConnected;
+    public bool IsConnected
+        => _multiplexer.IsConnected && Volatile.Read(ref _redisHealthy) == 1;
 
     public async ValueTask<ReadModelCacheEntry?> GetAsync(
         long clanId,
@@ -68,34 +74,50 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
         }
 
         var key = RedisKey(cacheKey);
-        var generation = Generation(cacheKey);
-        var load = _loads.GetOrAdd(
-            cacheKey,
-            _ => new Lazy<Task<ReadModelCacheEntry?>>(
-                () => LoadFromL2Async(cacheKey, key, generation),
-                LazyThreadSafetyMode.ExecutionAndPublication));
-        try
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            var result = await load.Value.ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
+            var generation = Generation(cacheKey);
+            var load = _loads.GetOrAdd(
+                cacheKey,
+                _ => new Lazy<Task<ReadModelCacheEntry?>>(
+                    () => LoadFromL2Async(cacheKey, key, generation),
+                    LazyThreadSafetyMode.ExecutionAndPublication));
+            ReadModelCacheEntry? result;
+            try
+            {
+                result = await load.Value.ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+            finally
+            {
+                // Remove only the load that this caller joined. A newer load may have
+                // replaced the entry after an invalidation; removing by key alone can
+                // break single-flight and cause a second L2 read.
+                ((ICollection<KeyValuePair<MonzeCacheKey, Lazy<Task<ReadModelCacheEntry?>>>>)_loads)
+                    .Remove(new KeyValuePair<MonzeCacheKey, Lazy<Task<ReadModelCacheEntry?>>>(cacheKey, load));
+            }
+
             if (result.HasValue)
             {
                 L2Hits.Add(1);
+                return result;
             }
-            else
+
+            // An invalidation can arrive after the generation snapshot but before
+            // StringGet completes. Retry once so that this safe stale-read rejection
+            // does not force an avoidable PostgreSQL fallback on the caller.
+            if (attempt == 0
+                && Generation(cacheKey) != generation
+                && !RedisTemporarilyUnavailable())
             {
-                L2Misses.Add(1);
+                continue;
             }
-            return result;
+
+            L2Misses.Add(1);
+            return null;
         }
-        finally
-        {
-            // Remove only the load that this caller joined. A newer load may have
-            // replaced the entry after an invalidation; removing by key alone can
-            // break single-flight and cause a second L2 read.
-            ((ICollection<KeyValuePair<MonzeCacheKey, Lazy<Task<ReadModelCacheEntry?>>>>)_loads)
-                .Remove(new KeyValuePair<MonzeCacheKey, Lazy<Task<ReadModelCacheEntry?>>>(cacheKey, load));
-        }
+
+        return null;
     }
 
     public async ValueTask<bool> SetAsync(
@@ -154,6 +176,7 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
             return false;
         }
 
+        MarkRedisHealthy();
         BumpGeneration(cacheKey);
         try
         {
@@ -225,6 +248,7 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
             return;
         }
 
+        MarkRedisHealthy();
         _logger.LogInformation("Redis cache invalidation committed.");
 
         try
@@ -239,9 +263,18 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
 
     public void Dispose()
     {
-        _subscriber.Unsubscribe(
-            RedisChannel.Literal(_prefix + InvalidationSuffix),
-            _invalidationHandler);
+        _multiplexer.ConnectionFailed -= _connectionFailedHandler;
+        _multiplexer.ConnectionRestored -= _connectionRestoredHandler;
+        try
+        {
+            _subscriber.Unsubscribe(
+                RedisChannel.Literal(_prefix + InvalidationSuffix),
+                _invalidationHandler);
+        }
+        catch (RedisException)
+        {
+            // Disposal must not turn an already degraded cache into a host shutdown failure.
+        }
         _l1.Dispose();
     }
 
@@ -283,6 +316,7 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
             MarkRedisFailure();
             return null;
         }
+        MarkRedisHealthy();
         if (Generation(cacheKey) != generation
             || !value.HasValue
             || !TryDecode(value, out var entry))
@@ -319,6 +353,7 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
 
     private void MarkRedisFailure()
     {
+        Volatile.Write(ref _redisHealthy, 0);
         var now = Environment.TickCount64;
         var retryAfter = now + RedisFailureCooldownMilliseconds;
         var previous = Volatile.Read(ref _redisRetryAfterMilliseconds);
@@ -333,6 +368,30 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
             "Redis cache degraded; using PostgreSQL fallback for the next {CooldownMilliseconds} ms. Cause={Cause}.",
             RedisFailureCooldownMilliseconds,
             "redis-operation-failed");
+    }
+
+    private void MarkRedisHealthy()
+    {
+        Volatile.Write(ref _redisHealthy, 1);
+        Volatile.Write(ref _redisRetryAfterMilliseconds, 0);
+    }
+
+    private async Task SubscribeToInvalidationsAsync()
+    {
+        try
+        {
+            await _subscriber.SubscribeAsync(
+                RedisChannel.Literal(_prefix + InvalidationSuffix),
+                _invalidationHandler).ConfigureAwait(false);
+            MarkRedisHealthy();
+        }
+        catch (RedisException ex)
+        {
+            MarkRedisFailure();
+            _logger.LogWarning(
+                ex,
+                "Redis invalidation subscription unavailable; continuing with PostgreSQL fallback.");
+        }
     }
 
     private void BumpGeneration(MonzeCacheKey key)

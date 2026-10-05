@@ -15,9 +15,4 @@ public interface IUserProfileRepository
         long clanId,
         long userId,
         CancellationToken cancellationToken);
-
-    Task<UserProfileSnapshot?> FindByUsernameAsync(
-        long clanId,
-        string username,
-        CancellationToken cancellationToken);
 }

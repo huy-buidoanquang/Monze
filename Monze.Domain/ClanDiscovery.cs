@@ -52,4 +52,20 @@ public static class ClanDiscovery
         IReadOnlySet<long> listedClanIds,
         bool listLooksCapped)
         => !listLooksCapped && !listedClanIds.Contains(clan.ClanId);
+
+    public static IReadOnlyList<KnownClan> PendingJoins(
+        IReadOnlyList<KnownClan> clans,
+        IReadOnlySet<long> successfullyJoinedClanIds)
+    {
+        var pending = new List<KnownClan>();
+        for (var i = 0; i < clans.Count; i++)
+        {
+            if (!successfullyJoinedClanIds.Contains(clans[i].ClanId))
+            {
+                pending.Add(clans[i]);
+            }
+        }
+
+        return pending;
+    }
 }

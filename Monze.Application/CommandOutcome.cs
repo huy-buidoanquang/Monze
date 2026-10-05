@@ -24,4 +24,5 @@ public sealed class CommandOutcome
     public bool ShowMeetingSchedules { get; init; }
     public IReadOnlyList<MeetingScheduleSummary>? MeetingSchedules { get; init; }
     public MeetingInvitation? MeetingInvitation { get; init; }
+    public MeetingSummaryRecord? MeetingSummary { get; init; }
 }

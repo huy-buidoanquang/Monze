@@ -131,7 +131,7 @@ The retained product surface is meeting, welcome, AI, setup, role, and shared in
 
 ## SDK and workspace boundaries
 
-- Keep the current published package set synchronized at version `1.6.0`: `Mezon.Net.Sdk`, `Mezon.Net.Sdk.Caching.Redis`, and `Mezon.Net.Sdk.Caching.Sqlite`, with `packages.lock.json` committed and consistent.
+- Keep the current published package set synchronized at version `1.6.2`: `Mezon.Net.Sdk`, `Mezon.Net.Sdk.Caching.Redis`, and `Mezon.Net.Sdk.Caching.Sqlite`, with `packages.lock.json` committed and consistent.
 - Treat `Mezon.Net`, `mezon-api`, `mezon-proto-server`, `mezon`, `mezon-desktop`, `Mezube`, and `pm-assistant-bot` as contract references unless the user explicitly authorizes changes there.
 - Never hand-edit generated protobuf, OpenAPI, or other generated bindings. Change the canonical source and regenerate in its owning repository.
 - For SDK limitations, create a handoff with the exact path, contract evidence, reproduction, test, and publish condition. Do not silently work around an authorization or ownership flaw with a less secure fallback.

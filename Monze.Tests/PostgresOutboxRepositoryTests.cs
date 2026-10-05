@@ -22,8 +22,9 @@ public sealed class PostgresOutboxRepositoryTests
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 
-        const long clanId = 2104288434238525440L;
-        const long channelId = 2104288438869037056L;
+        var suffix = Random.Shared.NextInt64(1, 1_000_000);
+        var clanId = -9_800_000_000_000_000L - suffix;
+        var channelId = clanId - 1;
         var firstKey = $"outbox-test:{Guid.NewGuid():N}";
         var uncertainKey = $"outbox-test:{Guid.NewGuid():N}";
 

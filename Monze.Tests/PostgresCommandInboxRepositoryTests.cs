@@ -29,6 +29,9 @@ public sealed class PostgresCommandInboxRepositoryTests
         var concurrentMessageId = secondMessageId == long.MinValue
             ? long.MinValue + 1
             : secondMessageId - 1;
+        var uncertainMessageId = concurrentMessageId == long.MinValue
+            ? long.MinValue + 1
+            : concurrentMessageId - 1;
 
         await using var dataSource = NpgsqlDataSource.Create(connectionString!);
         var repository = new PostgresCommandInboxRepository(dataSource);
@@ -53,7 +56,7 @@ public sealed class PostgresCommandInboxRepositoryTests
                 repository.TryClaimAsync(clanId, channelId, concurrentMessageId, CancellationToken.None));
             Assert.Equal(1, concurrentClaims.Count(static claim => claim.HasValue));
 
-            await repository.CompleteAsync(first!.Value, CancellationToken.None);
+            Assert.True(await repository.CompleteAsync(first!.Value, CancellationToken.None));
             var completedDuplicate = await repository.TryClaimAsync(
                 clanId,
                 channelId,
@@ -82,6 +85,22 @@ public sealed class PostgresCommandInboxRepositoryTests
                 channelId,
                 secondMessageId,
                 CancellationToken.None)).HasValue);
+
+            var uncertain = await repository.TryClaimAsync(
+                clanId,
+                channelId,
+                uncertainMessageId,
+                CancellationToken.None);
+            Assert.True(uncertain.HasValue);
+            Assert.True(await repository.MarkUncertainAsync(
+                uncertain!.Value,
+                CancellationToken.None));
+            await ExpireLeaseAsync(dataSource, clanId, channelId, uncertainMessageId);
+            Assert.False((await repository.TryClaimAsync(
+                clanId,
+                channelId,
+                uncertainMessageId,
+                CancellationToken.None)).HasValue);
         }
         finally
         {
@@ -94,8 +113,26 @@ public sealed class PostgresCommandInboxRepositoryTests
                 """, cleanup);
             command.Parameters.AddWithValue("clan", clanId);
             command.Parameters.AddWithValue("channel", channelId);
-            command.Parameters.AddWithValue("messages", new[] { firstMessageId, secondMessageId, concurrentMessageId });
+            command.Parameters.AddWithValue("messages", new[] { firstMessageId, secondMessageId, concurrentMessageId, uncertainMessageId });
             await command.ExecuteNonQueryAsync();
         }
+    }
+
+    private static async Task ExpireLeaseAsync(
+        NpgsqlDataSource dataSource,
+        long clanId,
+        long channelId,
+        long messageId)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync();
+        await using var command = new NpgsqlCommand("""
+            UPDATE command_inbox
+            SET locked_until = now() - interval '1 minute'
+            WHERE clan_id = @clan AND channel_id = @channel AND message_id = @message;
+            """, connection);
+        command.Parameters.AddWithValue("clan", clanId);
+        command.Parameters.AddWithValue("channel", channelId);
+        command.Parameters.AddWithValue("message", messageId);
+        await command.ExecuteNonQueryAsync();
     }
 }

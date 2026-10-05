@@ -141,6 +141,28 @@ public sealed class MonzeUiTests
     }
 
     [Fact]
+    public void Root_help_lists_setup_only_for_the_clan_owner()
+    {
+        var options = new MonzeCommandOptions("*", MonzeCommandNames.Monze);
+
+        var owner = MonzeMessageBuilder.HelpPage(
+            "commands",
+            options,
+            isAdmin: true,
+            canManageWelcome: true,
+            isOwner: true).RawJson;
+        var admin = MonzeMessageBuilder.HelpPage(
+            "commands",
+            options,
+            isAdmin: true,
+            canManageWelcome: true,
+            isOwner: false).RawJson;
+
+        Assert.Contains("*setup", owner, StringComparison.Ordinal);
+        Assert.DoesNotContain("*setup", admin, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Structured_outcome_fields_render_as_separate_embed_fields()
     {
         var content = MonzeMessageBuilder.Card(new CommandOutcome
@@ -244,9 +266,13 @@ public sealed class MonzeUiTests
         var content = MonzeMessageBuilder.WelcomePreview(
             new WelcomeEmbedSettings(Title: "Mẫu"),
             new MonzeCommandOptions("*", MonzeCommandNames.Monze),
-            token);
+            token,
+            "Chào {user}");
 
         var raw = content.RawJson;
+        var payload = Parse(raw);
+        Assert.Equal("Chào {user}", payload.GetProperty("t").GetString());
+        Assert.Equal("Mẫu", payload.GetProperty("embed")[0].GetProperty("title").GetString());
         Assert.Contains(MonzeButtonId.WelcomeSaveFor(token), raw, StringComparison.Ordinal);
         Assert.True(MonzeButtonId.TryReadWelcomeSaveToken(
             MonzeButtonId.WelcomeSaveFor(token),
