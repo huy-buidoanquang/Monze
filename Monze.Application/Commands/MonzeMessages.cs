@@ -48,6 +48,7 @@ public static class MonzeMessages
     public const string WelcomeMessageRequired = "Hãy nhập nội dung welcome.";
     public const string WelcomeSetupCancelled = "Đã huỷ cấu hình welcome. Chưa lưu thay đổi.";
     public const string WelcomeDraftInvalid = "Mã mẫu đã hết hạn, đã dùng hoặc không thuộc kênh này. Hãy mở lại welcome setup.";
+    public const string WelcomeConfigurationChanged = "Cấu hình welcome đã thay đổi. Hãy mở lại welcome setup trước khi lưu.";
     public const string WelcomePreview = "Bản xem trước welcome";
     public const string RoleGatewayNotReady = "Role gateway chưa sẵn sàng.";
     public const string RoleNotFound = "Không tìm thấy role đang hoạt động trong clan.";

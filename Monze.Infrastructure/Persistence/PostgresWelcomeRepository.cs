@@ -101,13 +101,16 @@ public sealed class PostgresWelcomeRepository : IWelcomeRepository
         bool enabled,
         string? text,
         WelcomeEmbedSettings embed,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long? expectedVersion = null)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
             INSERT INTO clan_settings(clan_id, welcome_enabled, welcome_text, welcome_embed)
             SELECT @clan, @enabled, @text, @embed
-            WHERE EXISTS (
+            WHERE (@expected IS NULL OR COALESCE(
+                (SELECT version FROM clan_settings WHERE clan_id = @clan), 0) = @expected)
+            AND EXISTS (
               SELECT 1
               FROM clan_registry c
               LEFT JOIN clan_admin a
@@ -121,11 +124,16 @@ public sealed class PostgresWelcomeRepository : IWelcomeRepository
                 welcome_text = COALESCE(EXCLUDED.welcome_text, clan_settings.welcome_text),
                 welcome_embed = EXCLUDED.welcome_embed,
                 version = clan_settings.version + 1
+            WHERE @expected IS NULL OR clan_settings.version = @expected
             RETURNING version;
             """, connection);
         command.Parameters.AddWithValue("clan", clanId);
         command.Parameters.AddWithValue("actor", actorUserId);
         command.Parameters.AddWithValue("enabled", enabled);
+        command.Parameters.Add(new NpgsqlParameter("expected", NpgsqlDbType.Bigint)
+        {
+            Value = (object?)expectedVersion ?? DBNull.Value
+        });
         command.Parameters.Add(new NpgsqlParameter("text", NpgsqlDbType.Text)
         {
             Value = (object?)text ?? DBNull.Value

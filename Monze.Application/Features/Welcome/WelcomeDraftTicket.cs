@@ -7,4 +7,5 @@ public sealed record WelcomeDraftTicket(
     bool Enabled,
     WelcomeEmbedSettings Draft,
     DateTimeOffset ExpiresAt,
-    string? Text = null);
+    string? Text = null,
+    long? ExpectedVersion = null);

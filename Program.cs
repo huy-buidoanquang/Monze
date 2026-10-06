@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Monze.Application;
 using Monze.Application.Commands;
 using Monze.Hosting;
+using Monze.Hosting.Logging;
 using Monze.Infrastructure.Caching;
 using Monze.Infrastructure.Persistence;
 using Npgsql;
@@ -17,12 +18,16 @@ internal static class Program
     {
         var builder = Host.CreateApplicationBuilder(args);
         builder.Logging.ClearProviders();
+        builder.Logging.AddConfiguration(builder.Configuration.GetSection("Logging"));
+        builder.Logging.SetMinimumLevel(LogLevel.Debug);
         builder.Logging.AddSimpleConsole(options =>
         {
             options.SingleLine = false;
             options.TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff zzz ";
             options.IncludeScopes = true;
         });
+        builder.Logging.AddProvider(new DailyFileLoggerProvider(
+            DailyFileLoggerOptions.From(builder.Configuration)));
         var migrateOnly = args.Any(arg => arg.Equals("migrate", StringComparison.OrdinalIgnoreCase));
         var env = builder.Environment.EnvironmentName;
         builder.Configuration

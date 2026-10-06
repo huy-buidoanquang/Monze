@@ -132,6 +132,13 @@ public sealed partial class MonzeBot
             }
             else
             {
+                if (outcome.ShowWelcomeSettings && outcome.WelcomeSettings is { } settings)
+                {
+                    _welcomeSetupDrafts.Set(
+                        new WelcomeSetupDraftKey(clanId, context.Channel.Id, context.Author.Id),
+                        settings,
+                        DateTimeOffset.UtcNow);
+                }
                 await ReplyCommandAsync(context, MonzeMessageBuilder.Card(outcome, _commandOptions));
             }
         }
@@ -156,10 +163,13 @@ public sealed partial class MonzeBot
         }
     }
 
-    private static bool IsAiCommand(CommandArguments args)
+    internal static bool IsAiCommand(CommandArguments args)
         => args.Length > 1
             && args[0].Equals(MonzeCommandNames.Ai, StringComparison.OrdinalIgnoreCase)
-            && !args[1].Equals(MonzeCommandNames.Help, StringComparison.OrdinalIgnoreCase);
+            && MonzeCommandNames.Normalize(args[1]) is MonzeCommandNames.AiSummary
+                or MonzeCommandNames.Translate
+                or MonzeCommandNames.Composer
+                or MonzeCommandNames.Simplify;
 
     private static bool IsAvatarCommand(string value)
         => value.Equals(MonzeCommandNames.Avatar, StringComparison.OrdinalIgnoreCase)

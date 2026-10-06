@@ -35,9 +35,7 @@ public static class MeetingCommandParser
             return false;
         }
 
-        if (args.Count >= 4
-            && ParseKind(args[^1]) is not null
-            && TryParseNamedSchedule(args, out request))
+        if (TryParseNamedSchedule(args, out request))
         {
             return true;
         }
@@ -56,7 +54,7 @@ public static class MeetingCommandParser
             return true;
         }
 
-        return TryParseNamedSchedule(args, out request);
+        return false;
     }
 
     private static bool TryParseNamedSchedule(
@@ -70,28 +68,26 @@ public static class MeetingCommandParser
         }
 
         var kind = MeetingScheduleKind.Once;
-        var dateIndex = 1;
-        if (ParseKind(args[1]) is { } explicitKind)
-        {
-            kind = explicitKind;
-            dateIndex = 2;
-        }
-
-        if (dateIndex >= args.Count || !IsDate(args[dateIndex]))
-        {
-            dateIndex = FindDate(args, 1);
-            if (dateIndex < 0)
-            {
-                return false;
-            }
-        }
-
-        if (dateIndex == 0 || dateIndex + 1 >= args.Count || !IsTime(args[dateIndex + 1]))
+        var dateIndex = FindDate(args, 1);
+        if (dateIndex < 1 || dateIndex + 1 >= args.Count || !IsTime(args[dateIndex + 1]))
         {
             return false;
         }
 
-        var name = JoinArguments(args, 0, dateIndex);
+        // A frequency followed directly by a date/time remains legacy syntax.
+        if (dateIndex == 1 && args.Count == 3 && ParseKind(args[0]) is not null)
+        {
+            return false;
+        }
+
+        var nameEnd = dateIndex;
+        if (dateIndex > 1 && ParseKind(args[dateIndex - 1]) is { } explicitKind)
+        {
+            kind = explicitKind;
+            nameEnd--;
+        }
+
+        var name = JoinArguments(args, 0, nameEnd);
         if (name.Length == 0 || name.Length > 120)
         {
             return false;

@@ -61,9 +61,13 @@ public sealed partial class MonzeBot
         var key = GetWelcomeSetupDraftKey(context);
         if (_welcomeSetupDrafts.TryGet(key, DateTimeOffset.UtcNow, out var draft))
         {
-            current = draft;
+            if (draft.Version == current.Version)
+            {
+                current = draft;
+            }
         }
 
+        _welcomeSetupDrafts.Set(key, current, DateTimeOffset.UtcNow);
         await UpdatePrivateInteractionAsync(
             context,
             MonzeMessageBuilder.WelcomeSettings(current));
@@ -90,6 +94,11 @@ public sealed partial class MonzeBot
         var key = GetWelcomeSetupDraftKey(context);
         if (_welcomeSetupDrafts.TryGet(key, DateTimeOffset.UtcNow, out var savedDraft))
         {
+            if (savedDraft.Version != current.Version)
+            {
+                await RejectStaleWelcomeDraftAsync(context);
+                return;
+            }
             current = savedDraft;
         }
 
@@ -147,6 +156,11 @@ public sealed partial class MonzeBot
 
         if (_welcomeSetupDrafts.TryGet(key, DateTimeOffset.UtcNow, out var savedDraft))
         {
+            if (savedDraft.Version != current.Version)
+            {
+                await RejectStaleWelcomeDraftAsync(context);
+                return;
+            }
             current = savedDraft;
         }
 
@@ -162,7 +176,8 @@ public sealed partial class MonzeBot
             enabled,
             draft,
             context.CancellationToken,
-            current.Text);
+            current.Text,
+            current.Version);
         await UpdatePrivateInteractionAsync(context, MonzeMessageBuilder.Card(outcome, _commandOptions));
     }
 
@@ -223,6 +238,10 @@ public sealed partial class MonzeBot
                 context.User.Id,
                 token,
                 context.CancellationToken);
+            if (saveOutcome.Tone == MonzeTone.Ok)
+            {
+                _welcomeSetupDrafts.Remove(GetWelcomeSetupDraftKey(context));
+            }
             await UpdatePrivateInteractionAsync(
                 context,
                 MonzeMessageBuilder.Card(saveOutcome, _commandOptions));
@@ -240,6 +259,11 @@ public sealed partial class MonzeBot
 
         if (_welcomeSetupDrafts.TryGet(key, DateTimeOffset.UtcNow, out var savedDraft))
         {
+            if (savedDraft.Version != current.Version)
+            {
+                await RejectStaleWelcomeDraftAsync(context);
+                return;
+            }
             current = savedDraft;
         }
 
@@ -255,14 +279,21 @@ public sealed partial class MonzeBot
             enabled,
             draft,
             context.CancellationToken,
-            current.Text);
-        if (outcome.Tone != MonzeTone.Error)
+            current.Text,
+            current.Version);
+        if (outcome.Tone == MonzeTone.Ok)
         {
             _welcomeSetupDrafts.Remove(key);
         }
 
         await UpdatePrivateInteractionAsync(context, MonzeMessageBuilder.Card(outcome, _commandOptions));
     }
+
+    private Task<long> RejectStaleWelcomeDraftAsync(IInteractionContext context)
+        => UpdatePrivateInteractionAsync(context, MonzeMessageBuilder.Card(
+            MonzeMessages.TitleWelcome,
+            MonzeMessages.WelcomeConfigurationChanged,
+            MonzeTone.Warn));
 
     private static WelcomeSetupDraftKey GetWelcomeSetupDraftKey(IInteractionContext context)
         => new(context.Channel.ClanId, context.Channel.Id, context.User.Id);

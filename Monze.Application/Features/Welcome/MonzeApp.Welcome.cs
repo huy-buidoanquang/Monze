@@ -25,7 +25,7 @@ public sealed partial class MonzeApp
         if (args.Length > 0
             && args[0].Equals(MonzeCommandActions.Preview, StringComparison.OrdinalIgnoreCase))
         {
-            return await GetWelcomePreviewAsync(clanId, userId, cancellationToken);
+            return await GetWelcomePreviewAsync(clanId, userId, cancellationToken, channelId);
         }
 
         if (args.Length > 0
@@ -108,7 +108,8 @@ public sealed partial class MonzeApp
         bool enabled,
         WelcomeEmbedSettings draft,
         CancellationToken cancellationToken,
-        string? messageText = null)
+        string? messageText = null,
+        long? expectedVersion = null)
     {
         var normalized = NormalizeWelcomeEmbed(draft);
         var ticket = _welcomeDrafts.Create(
@@ -117,7 +118,8 @@ public sealed partial class MonzeApp
             enabled,
             normalized,
             DateTimeOffset.UtcNow,
-            messageText);
+            messageText,
+            expectedVersion);
 
         return Task.FromResult(new CommandOutcome
         {
@@ -133,7 +135,8 @@ public sealed partial class MonzeApp
     public async Task<CommandOutcome> GetWelcomePreviewAsync(
         long clanId,
         long userId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long channelId = 0)
     {
         if (!await _authorization.IsAdminAsync(clanId, userId, cancellationToken))
         {
@@ -142,14 +145,18 @@ public sealed partial class MonzeApp
 
         var settings = await _welcome.GetWelcomeAsync(clanId, cancellationToken)
             ?? new WelcomeSettings(false, null, 0);
+        var draft = settings.Embed ?? new WelcomeEmbedSettings(
+            Title: "Chào mừng",
+            Description: settings.Text ?? MonzeMessages.DefaultWelcomeText);
+        var ticket = _welcomeDrafts.Create(clanId, channelId, settings.Enabled,
+            draft, DateTimeOffset.UtcNow, settings.Text, settings.Version);
         return new CommandOutcome
         {
             Title = MonzeMessages.WelcomePreview,
             Text = settings.Text ?? MonzeMessages.DefaultWelcomeText,
             ShowWelcomePreview = true,
-            WelcomeDraft = settings.Embed ?? new WelcomeEmbedSettings(
-                Title: "Chào mừng",
-                Description: settings.Text ?? MonzeMessages.DefaultWelcomeText),
+            WelcomeDraft = draft,
+            WelcomeDraftToken = ticket.Token,
             WelcomeMessageText = settings.Text
         };
     }
@@ -211,7 +218,8 @@ public sealed partial class MonzeApp
                 ticket.Enabled,
                 ticket.Draft,
                 cancellationToken,
-                ticket.Text);
+                ticket.Text,
+                ticket.ExpectedVersion);
             if (outcome.Tone == MonzeTone.Error)
             {
                 _welcomeDrafts.Release(ticket);
@@ -234,7 +242,8 @@ public sealed partial class MonzeApp
         bool enabled,
         WelcomeEmbedSettings draft,
         CancellationToken cancellationToken,
-        string? welcomeText = null)
+        string? welcomeText = null,
+        long? expectedVersion = null)
     {
         if (!await _authorization.IsAdminAsync(clanId, userId, cancellationToken))
         {
@@ -248,9 +257,15 @@ public sealed partial class MonzeApp
             enabled,
             welcomeText,
             normalized,
-            cancellationToken);
+            cancellationToken,
+            expectedVersion);
         if (version == 0)
         {
+            if (expectedVersion is not null
+                && await _authorization.IsAdminAsync(clanId, userId, cancellationToken))
+            {
+                return Say(MonzeMessages.WelcomeConfigurationChanged, tone: MonzeTone.Warn);
+            }
             return Say(MonzeMessages.WelcomeAdminOnly, tone: MonzeTone.Error);
         }
         try

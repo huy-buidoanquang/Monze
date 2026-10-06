@@ -161,7 +161,7 @@ public sealed partial class MonzeBot
                 }
             }
 
-            await context.ReplyAsync(MonzeMessageBuilder.Card(outcome, _commandOptions));
+            await ReplyCommandAsync(context, MonzeMessageBuilder.Card(outcome, _commandOptions));
         }
         catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
         {

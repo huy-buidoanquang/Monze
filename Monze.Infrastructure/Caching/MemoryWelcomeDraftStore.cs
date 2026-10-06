@@ -19,7 +19,8 @@ public sealed class MemoryWelcomeDraftStore : IWelcomeDraftStore
         bool enabled,
         WelcomeEmbedSettings draft,
         DateTimeOffset now,
-        string? text = null)
+        string? text = null,
+        long? expectedVersion = null)
     {
         lock (_capacityGate)
         {
@@ -39,7 +40,8 @@ public sealed class MemoryWelcomeDraftStore : IWelcomeDraftStore
                 enabled,
                 draft,
                 now.Add(Lifetime),
-                text);
+                text,
+                expectedVersion);
 
             if (!_tickets.TryAdd(token, ticket))
             {

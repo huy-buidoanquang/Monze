@@ -8,7 +8,8 @@ public interface IWelcomeDraftStore
         bool enabled,
         WelcomeEmbedSettings draft,
         DateTimeOffset now,
-        string? text = null);
+        string? text = null,
+        long? expectedVersion = null);
 
     bool TryGet(
         string token,

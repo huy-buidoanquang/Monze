@@ -141,8 +141,13 @@ internal sealed class MonzeAppTestDependencies :
         bool enabled,
         string? text,
         WelcomeEmbedSettings embed,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long? expectedVersion = null)
     {
+        if (expectedVersion is not null && expectedVersion != (WelcomeSettings?.Version ?? 0))
+        {
+            return Task.FromResult(0L);
+        }
         WelcomeConfigurationWrites++;
         WelcomeEnabled = enabled;
         WelcomeText = text;
