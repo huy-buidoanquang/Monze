@@ -369,6 +369,26 @@ public sealed class MonzeAppCommandTests
     }
 
     [Fact]
+    public async Task Saved_schedule_reports_the_next_run_in_the_schedule_time_zone()
+    {
+        var dependencies = new MonzeAppTestDependencies();
+        var app = dependencies.CreateApp();
+        var future = DateTimeOffset.UtcNow.AddDays(2);
+
+        var scheduled = await app.HandleMeetingAsync(
+            ClanId,
+            ChannelId,
+            UserId,
+            ["Review", future.ToString("dd/MM/yyyy"), "18:30", "once"],
+            _ => Task.FromResult<MeetingVoiceCandidate?>(null),
+            CancellationToken.None);
+
+        Assert.Equal(MonzeTone.Ok, scheduled.Tone);
+        Assert.Contains("18:30 (Asia/Ho_Chi_Minh)", scheduled.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("UTC", scheduled.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Summary_is_admin_only_and_scoped_to_clan_and_session()
     {
         var dependencies = new MonzeAppTestDependencies

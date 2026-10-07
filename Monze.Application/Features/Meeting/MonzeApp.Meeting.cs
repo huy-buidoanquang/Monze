@@ -76,7 +76,8 @@ public sealed partial class MonzeApp
                 request.Name ?? "Cuộc họp",
                 scheduleId,
                 request.Kind,
-                next),
+                next,
+                timeZoneId),
                 title: MonzeMessages.TitleMeeting,
                 tone: MonzeTone.Ok);
         }

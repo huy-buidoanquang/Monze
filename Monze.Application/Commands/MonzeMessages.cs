@@ -75,8 +75,9 @@ public static class MonzeMessages
         string name,
         long id,
         MeetingScheduleKind kind,
-        DateTimeOffset next)
-        => $"Đã lưu lịch \"{name}\" (#{id}), kiểu {kind.ToString().ToLowerInvariant()}, lần tới {next:dd/MM/yyyy HH:mm} UTC.";
+        DateTimeOffset next,
+        string timeZoneId)
+        => $"Đã lưu lịch \"{name}\" (#{id}), kiểu {kind.ToString().ToLowerInvariant()}, lần tới {LocalSchedule.Describe(next, timeZoneId)}.";
 
     public static string UnknownCommand(MonzeCommandOptions options)
         => $"Lệnh không rõ. Gõ {options.HelpCommand}.";

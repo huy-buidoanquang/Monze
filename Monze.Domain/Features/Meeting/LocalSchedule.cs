@@ -41,4 +41,21 @@ public static class LocalSchedule
         utc = TimeZoneInfo.ConvertTimeToUtc(local, zone);
         return true;
     }
+
+    public static string Describe(DateTimeOffset instant, string timeZoneId)
+    {
+        try
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+            return $"{TimeZoneInfo.ConvertTime(instant, zone):dd/MM/yyyy HH:mm} ({timeZoneId})";
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return $"{instant.ToUniversalTime():dd/MM/yyyy HH:mm} UTC";
+        }
+        catch (InvalidTimeZoneException)
+        {
+            return $"{instant.ToUniversalTime():dd/MM/yyyy HH:mm} UTC";
+        }
+    }
 }

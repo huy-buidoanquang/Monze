@@ -239,21 +239,7 @@ public static partial class MonzeMessageBuilder
     }
 
     private static string FormatScheduleTime(MeetingScheduleSummary schedule)
-    {
-        try
-        {
-            var zone = TimeZoneInfo.FindSystemTimeZoneById(schedule.TimeZoneId);
-            return $"{TimeZoneInfo.ConvertTime(schedule.NextRunAt, zone):dd/MM/yyyy HH:mm} ({schedule.TimeZoneId})";
-        }
-        catch (TimeZoneNotFoundException)
-        {
-            return $"{schedule.NextRunAt:dd/MM/yyyy HH:mm} UTC";
-        }
-        catch (InvalidTimeZoneException)
-        {
-            return $"{schedule.NextRunAt:dd/MM/yyyy HH:mm} UTC";
-        }
-    }
+        => LocalSchedule.Describe(schedule.NextRunAt, schedule.TimeZoneId);
 
     private static string FormatScheduleKind(MeetingScheduleSummary schedule)
         => schedule.Kind switch
