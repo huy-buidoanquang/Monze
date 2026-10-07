@@ -237,7 +237,7 @@ public sealed partial class MonzeBot
         return firstPublicText;
     }
 
-    private static async Task<(
+    private async Task<(
         IReadOnlyDictionary<string, (long Id, string Label)> Users,
         IReadOnlyDictionary<string, (long Id, string Label)> Roles,
         IReadOnlyDictionary<string, (long Id, string Label)> Channels,
@@ -256,6 +256,10 @@ public sealed partial class MonzeBot
             return (users, roles, channels, newUserLabel);
         }
 
+        // Target resolution is optional: the welcome still goes out with the
+        // configured text when a lookup fails. Each lookup is isolated so one
+        // failure does not silently drop the others, and every failure is
+        // logged because an unresolved placeholder is visible to the member.
         try
         {
             var memberList = await client.ListClanUsersAsync(
@@ -278,8 +282,28 @@ public sealed partial class MonzeBot
                 AddWelcomeTarget(users, member.User.Id, member.User.DisplayName);
                 AddWelcomeTarget(users, member.User.Id, member.ClanNick);
             }
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Welcome member lookup failed; user placeholders stay as plain text.");
+        }
 
-            if (client.Clans.TryGet(item.ClanId, out var clan))
+        Mezon.Net.Sdk.Entities.Clan? clan = null;
+        try
+        {
+            if (!client.Clans.TryGet(item.ClanId, out clan!))
+            {
+                clan = await client.GetClanAsync(item.ClanId, cancellationToken);
+            }
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Welcome clan lookup failed; role and channel placeholders stay as plain text.");
+        }
+
+        if (clan is not null)
+        {
+            try
             {
                 var roleList = await clan.ListRolesAsync(
                     limit: 1000,
@@ -292,7 +316,14 @@ public sealed partial class MonzeBot
                         AddWelcomeTarget(roles, role.Id, role.Title);
                     }
                 }
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "Welcome role lookup failed; role placeholders stay as plain text.");
+            }
 
+            try
+            {
                 var channelList = await clan.LoadChannelsAsync(
                     options: new RequestOptions { SocketSendTimeout = 5_000 });
                 for (var i = 0; i < channelList.Channeldesc.Count; i++)
@@ -301,11 +332,10 @@ public sealed partial class MonzeBot
                     AddWelcomeTarget(channels, channel.ChannelId, channel.ChannelLabel);
                 }
             }
-        }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            // Target resolution is optional. The welcome still goes out with the
-            // configured text when a directory lookup is temporarily unavailable.
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "Welcome channel lookup failed; channel placeholders stay as plain text.");
+            }
         }
 
         AddWelcomeTarget(users, item.UserId, newUserLabel);
