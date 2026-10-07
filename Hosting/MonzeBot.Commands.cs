@@ -241,7 +241,14 @@ public sealed partial class MonzeBot
                 }
 
                 var content = MessageContent.Parse(message.Content);
-                if (string.IsNullOrWhiteSpace(content.Text))
+                if (string.IsNullOrWhiteSpace(content.Text)
+                    || !AiReplyWindow.IsConversationMessage(
+                        message.MessageId,
+                        anchorId,
+                        message.SenderId,
+                        context.Client.BotId,
+                        content.Text!,
+                        _commandOptions.Prefix))
                 {
                     continue;
                 }
