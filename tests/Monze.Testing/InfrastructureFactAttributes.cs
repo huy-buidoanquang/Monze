@@ -30,6 +30,21 @@ public sealed class DbTheoryAttribute : TheoryAttribute
     }
 }
 
+/// <summary>
+/// A fact that needs the second campaign PostgreSQL server
+/// (MONZE_TEST_POSTGRES_ALT); same skip rules as <see cref="DbFactAttribute"/>.
+/// </summary>
+public sealed class AlternateDbFactAttribute : FactAttribute
+{
+    public AlternateDbFactAttribute()
+    {
+        if (!TestPostgres.IsAlternateConfigured && !CampaignEnvironment.Strict)
+        {
+            Skip = $"Requires {TestPostgres.AlternateConnectionVariable} (second campaign PostgreSQL).";
+        }
+    }
+}
+
 /// <summary>A fact that needs the campaign Redis; same skip rules as <see cref="DbFactAttribute"/>.</summary>
 public sealed class RedisFactAttribute : FactAttribute
 {

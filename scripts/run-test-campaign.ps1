@@ -285,6 +285,7 @@ try {
     $needsDb = ($requested -contains 'integration')
     if ($needsDb) {
         $null = Start-CampaignPostgres 'pg17' 'postgres:17-alpine' 55432 $secrets.postgres 'monze_t_integration'
+        $null = Start-CampaignPostgres 'pg16' 'postgres:16' 55433 $secrets.postgres 'monze_t_integration'
         $null = Start-CampaignRedis 'redis' 56379 $secrets.redis
     }
 
@@ -339,12 +340,13 @@ try {
             }
             'integration' {
                 $env:MONZE_TEST_POSTGRES = "Host=127.0.0.1;Port=55432;Database=monze_t_integration;Username=monze;Password=$($secrets.postgres)"
+                $env:MONZE_TEST_POSTGRES_ALT = "Host=127.0.0.1;Port=55433;Database=monze_t_integration;Username=monze;Password=$($secrets.postgres)"
                 $env:MONZE_REDIS_CONNECTION = "127.0.0.1:56379,password=$($secrets.redis)"
                 try {
                     $result = Invoke-TestTier -Tier 'integration' -Project 'tests/Monze.Tests.Integration/Monze.Tests.Integration.csproj' -TimeoutMinutes 25 -Strict -Coverage
                 }
                 finally {
-                    Remove-Item Env:MONZE_TEST_POSTGRES, Env:MONZE_REDIS_CONNECTION -ErrorAction SilentlyContinue
+                    Remove-Item Env:MONZE_TEST_POSTGRES, Env:MONZE_TEST_POSTGRES_ALT, Env:MONZE_REDIS_CONNECTION -ErrorAction SilentlyContinue
                 }
             }
             'micro' {
@@ -370,7 +372,7 @@ catch {
 }
 finally {
     # ------------------------------------------------------------ cleanup (always)
-    foreach ($name in 'MONZE_CAMPAIGN_ID', 'MONZE_CAMPAIGN_STRICT', 'MONZE_CASE_LEDGER_DIR', 'MONZE_CAMPAIGN_ARTIFACTS', 'MONZE_PBT_SCALE', 'MONZE_CAMPAIGN_SEED', 'MONZE_TEST_POSTGRES', 'MONZE_REDIS_CONNECTION') {
+    foreach ($name in 'MONZE_CAMPAIGN_ID', 'MONZE_CAMPAIGN_STRICT', 'MONZE_CASE_LEDGER_DIR', 'MONZE_CAMPAIGN_ARTIFACTS', 'MONZE_PBT_SCALE', 'MONZE_CAMPAIGN_SEED', 'MONZE_TEST_POSTGRES', 'MONZE_TEST_POSTGRES_ALT', 'MONZE_REDIS_CONNECTION') {
         Remove-Item "Env:$name" -ErrorAction SilentlyContinue
     }
     if (-not $KeepContainers) {

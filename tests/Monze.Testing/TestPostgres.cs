@@ -13,6 +13,10 @@ namespace Monze.Testing;
 public static class TestPostgres
 {
     public const string ConnectionVariable = "MONZE_TEST_POSTGRES";
+
+    /// <summary>A second campaign server (another PostgreSQL major version) for the migration matrix.</summary>
+    public const string AlternateConnectionVariable = "MONZE_TEST_POSTGRES_ALT";
+
     public const string ClusterNamePrefix = "monze-test-";
     public const string DatabaseNamePrefix = "monze_";
 
@@ -21,24 +25,29 @@ public static class TestPostgres
     public static bool IsConfigured
         => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(ConnectionVariable));
 
+    public static bool IsAlternateConfigured
+        => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(AlternateConnectionVariable));
+
     /// <summary>
     /// Returns the guarded connection string, or throws when it is missing or
     /// points anywhere other than a local campaign container.
     /// </summary>
-    public static string ConnectionString
-    {
-        get
-        {
-            var value = Environment.GetEnvironmentVariable(ConnectionVariable);
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                throw new InvalidOperationException(
-                    $"Set {ConnectionVariable} to a throwaway campaign PostgreSQL (see scripts/run-test-campaign.ps1).");
-            }
+    public static string ConnectionString => Read(ConnectionVariable);
 
-            AssertCampaignDatabase(value);
-            return value;
+    /// <summary>The guarded connection string of the second campaign server.</summary>
+    public static string AlternateConnectionString => Read(AlternateConnectionVariable);
+
+    private static string Read(string variable)
+    {
+        var value = Environment.GetEnvironmentVariable(variable);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException(
+                $"Set {variable} to a throwaway campaign PostgreSQL (see scripts/run-test-campaign.ps1).");
         }
+
+        AssertCampaignDatabase(value);
+        return value;
     }
 
     /// <summary>
