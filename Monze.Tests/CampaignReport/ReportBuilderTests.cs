@@ -111,6 +111,42 @@ public sealed class ReportBuilderTests : IDisposable
         Assert.All(findings, finding => Assert.DoesNotContain(CanarySecret, finding.Rule, StringComparison.Ordinal));
     }
 
+    [Fact]
+    [Req("REQ-RPT-006")]
+    public void Traceability_section_lists_groups_requirements_and_legacy_test_ids()
+    {
+        WriteManifest(("build", "PASS"), ("inventory", "PASS"));
+        var directory = Path.Combine(_root, "raw", "traceability");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "trace-map.json"), JsonSerializer.Serialize(new
+        {
+            schema = "monze.artifact.v1",
+            kind = "traceability",
+            id = "trace-map",
+            title = "Inventory và traceability",
+            verdict = "PASS",
+            metrics = new { inventoryItems = 3, declared = 3, undeclared = 0, mappedItems = 2, mappedPercent = 66.7, requirements = 2, requirementsWithTests = 1 },
+            invariants = Array.Empty<object>(),
+            defectIds = Array.Empty<string>(),
+            notes = "",
+            durationMinutes = 0,
+            groups = new[] { new { name = "cmd", total = 3, mapped = 2, observed = 0, excluded = 0 } },
+            requirements = new[]
+            {
+                new { id = "REQ-CMD-001", title = "Định tuyến lệnh", tests = 4 },
+                new { id = "REQ-HOST-011", title = "Vòng đời bot", tests = 0 }
+            },
+            legacy = new[] { new { testId = "CMD-HELP", requirements = new[] { "REQ-HELP-001" }, tests = 15 } }
+        }));
+
+        var report = File.ReadAllText(Build().ReportPath);
+
+        Assert.Contains("| cmd | 3 | 2 | 0 | 0 |", report, StringComparison.Ordinal);
+        Assert.Contains("Requirement có test: 1/2", report, StringComparison.Ordinal);
+        Assert.Contains("REQ-HOST-011 (Vòng đời bot)", report, StringComparison.Ordinal);
+        Assert.Contains("| CMD-HELP | REQ-HELP-001 | 15 |", report, StringComparison.Ordinal);
+    }
+
     private ReportBuildResult Build() => ReportBuilder.Build(_root, null, null, null);
 
     private void WriteManifest(params (string Name, string Status)[] tiers)

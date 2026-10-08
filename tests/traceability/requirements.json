@@ -1,0 +1,462 @@
+{
+  "schema": "monze.requirements.v1",
+  "patterns": "covers: '<kind>:<id glob>' matches inventory ids, '<kind>@<source glob>' matches items of that kind by source file. tests: globs over 'Class.Method' of test methods, in addition to tests tagged [Req(id)]. legacyTestIds: the TEST-IDs of docs/test-artifacts/capability-inventory.json.",
+  "requirements": [
+    {
+      "id": "REQ-CMD-001",
+      "area": "commands",
+      "title": "Định tuyến lệnh: prefix, root, lệnh lạ và clan không xác định",
+      "legacyTestIds": [],
+      "covers": ["cmd:monze", "cmd:unknown", "msg:UnknownCommand", "msg:UnknownClan", "msg:TitleMonze", "msg:TemporaryFailure", "cfg:Monze:Commands:*", "sdk:client.UseCommands", "sdk:context.ReplyAsync", "log@Hosting/MonzeBot.Commands.cs", "log@Hosting/MonzeBot.Routing.cs"],
+      "tests": ["CommandArgumentsTests.*", "MonzeAppCommandTests.*", "BrowserRegressionTests.*"]
+    },
+    {
+      "id": "REQ-HELP-001",
+      "area": "help",
+      "title": "Menu help theo quyền, điều hướng trên cùng tin nhắn và đóng",
+      "legacyTestIds": ["CMD-HELP", "INT-HELP"],
+      "covers": ["cmd:help", "btn:monze_help_*", "msg:TitleHelp", "msg:MonzeHelp", "sdk:context.UpdateEphemeralAsync", "sdk:context.DeleteEphemeralAsync", "log@Hosting/MonzeBot.InteractionResponses.cs"],
+      "tests": ["CommandHelpTests.*", "MonzeUiTests.Help*", "SdkEphemeralContractTests.*", "InteractionAuthorizationTests.*"]
+    },
+    {
+      "id": "REQ-SETUP-001",
+      "area": "setup",
+      "title": "Setup clan và delegate: chỉ owner, kiểm tra thành viên, không tự uỷ quyền",
+      "legacyTestIds": ["CMD-SETUP", "PORT-AUTH"],
+      "covers": ["cmd:setup", "msg:Delegate*", "msg:OwnerAlreadyAdmin", "msg:OwnerOnly", "msg:AdminOnly", "msg:TitleClanSetup", "port:IAuthorizationRepository.*", "table:clan_admin"],
+      "tests": ["MonzeAppCommandTests.Setup*", "PostgresAuthorizationSecurityTests.*"]
+    },
+    {
+      "id": "REQ-WEL-001",
+      "area": "welcome",
+      "title": "Cấu hình welcome: bật/tắt, message, embed và draft",
+      "legacyTestIds": ["CMD-WELCOME", "PORT-WELCOME"],
+      "covers": ["cmd:welcome", "msg:Welcome*", "msg:TitleWelcome*", "msg:DefaultWelcomeText", "port:IWelcomeRepository.*", "port:IWelcomeDraftStore.*", "table:clan_settings"],
+      "tests": ["WelcomeFeatureTests.*", "WelcomeDraftStoreTests.*", "PostgresWelcomeRepositoryTests.*", "MonzeAppCommandTests.Welcome*"]
+    },
+    {
+      "id": "REQ-WEL-002",
+      "area": "welcome",
+      "title": "Form welcome: section, preview, lưu theo version, huỷ và hết hạn",
+      "legacyTestIds": ["INT-WELCOME"],
+      "covers": ["btn:monze_welcome_*", "msg:InteractionExpired", "port:IWelcomeSetupDraftStore.*"],
+      "tests": ["MonzeWelcomeFormParserTests.*", "WelcomeSetupDraftStoreTests.*", "MonzeUiTests.Welcome*"]
+    },
+    {
+      "id": "REQ-WEL-003",
+      "area": "welcome",
+      "title": "Gửi welcome khi thành viên join: claim một lần, bỏ qua bot, nhả claim khi gửi lỗi",
+      "legacyTestIds": ["EVT-WELCOME", "WRK-WELCOME"],
+      "covers": ["sdk:client.ClanUserAdded", "table:welcome_delivery", "log@Features/Welcome/*", "metric:monze.ingress.welcome.*", "msg:MemberFallbackLabel"],
+      "tests": ["WelcomeFeatureTests.*", "PostgresWelcomeRepositoryTests.*"]
+    },
+    {
+      "id": "REQ-ROLE-001",
+      "area": "roles",
+      "title": "Lệnh role: bật/tắt tự động, luật on-join và tenure",
+      "legacyTestIds": ["CMD-ROLE", "PORT-ROLE"],
+      "covers": ["cmd:role", "msg:Role*", "msg:TitleRole", "port:IRoleRepository.*", "table:role_rule", "table:role_grant"],
+      "tests": ["MonzeAppCommandTests.*Role*", "MonzeAppCommandTests.Automatic_roles*", "PostgresRoleRepositoryTests.*", "DomainRulesTests.*"]
+    },
+    {
+      "id": "REQ-ROLE-002",
+      "area": "roles",
+      "title": "Quét role định kỳ qua gateway Mezon, không gán lại role đã có",
+      "legacyTestIds": ["WRK-ROLE"],
+      "covers": ["port:IMezonRoleGateway.*", "log@Features/Roles/*", "sdk:client.ListClanUsersAsync"],
+      "tests": ["MonzeAppCommandTests.Automatic_roles*", "MonzeAppCommandTests.Tenure_rule*"]
+    },
+    {
+      "id": "REQ-AI-001",
+      "area": "ai",
+      "title": "Lệnh AI: giới hạn input, ngân sách token theo ngày, concurrency, provider OpenAI-compatible",
+      "legacyTestIds": ["CMD-AI", "PORT-AI-USAGE"],
+      "covers": ["cmd:ai", "cmd:translate", "cmd:composer", "cmd:simplify", "msg:Ai*", "cfg:Monze:Ai:*", "port:IAiProvider.*", "port:IAiUsageRepository.*", "table:ai_usage", "http:v1/chat/completions", "log@Features/Ai/*"],
+      "tests": ["OpenAiCompatibleProviderTests.*", "MonzeAiInstructionsTests.*", "AiReplyWindowTests.*", "PostgresAiUsageRepositoryTests.*", "MonzeAppCommandTests.Ai*"]
+    },
+    {
+      "id": "REQ-AVA-001",
+      "area": "avatar",
+      "title": "Avatar thành viên qua reply/mention, cô lập theo clan",
+      "legacyTestIds": ["CMD-AVATAR", "PORT-PROFILE"],
+      "covers": ["cmd:avatar", "cmd:ava", "cmd:avt", "msg:Avatar*", "log@Features/Avatar/*", "port:IUserProfileRepository.*", "table:clan_user_profile"],
+      "tests": ["AvatarFeatureTests.*", "PostgresUserProfileRepositoryTests.*"]
+    },
+    {
+      "id": "REQ-MTG-001",
+      "area": "meeting",
+      "title": "Lệnh meeting: chọn phòng voice trống, bắt đầu ngay, mời và form lịch",
+      "legacyTestIds": ["CMD-MEETING", "INT-MEETING"],
+      "covers": ["cmd:meeting", "btn:monze_meeting_*", "msg:TitleMeeting", "msg:NoVoiceRoom", "msg:VoiceClaimConflict", "msg:MeetingAgentInstruction", "msg:InvalidTime", "msg:Meeting*", "msg:ScheduleSaved", "log@Features/Meeting/MonzeBot.Meetings.cs", "log@Features/Meeting/MonzeBot.MeetingScheduleInteraction.cs", "log@Features/Meeting/MonzeBot.MeetingInvitation.cs", "table:meeting_session", "table:voice_claim"],
+      "tests": ["MeetingUiTests.*", "MeetingInvitationDeliveryTests.*", "MeetingReplyReferenceTests.*", "PostgresMeetingVoiceClaimTests.*", "DomainRulesTests.*"]
+    },
+    {
+      "id": "REQ-MTG-002",
+      "area": "meeting",
+      "title": "Lịch meeting once/daily/weekly theo time zone, mỗi lần chạy đúng một occurrence",
+      "legacyTestIds": ["WRK-SCHEDULE", "PORT-SCHEDULED", "PORT-SCHEDULING"],
+      "covers": ["port:ISchedulingRepository.*", "port:IScheduledMeetingRepository.*", "table:meeting_schedule", "log@Features/Meeting/MonzeBot.ScheduledMeetings.cs"],
+      "tests": ["PostgresSchedulingRepositoryTests.*", "PostgresScheduledMeetingRepositoryTests.*", "DomainRulesTests.*"]
+    },
+    {
+      "id": "REQ-MTG-003",
+      "area": "meeting",
+      "title": "Sự kiện Agent: lọc scope, khử trùng, gắn đúng phiên meeting",
+      "legacyTestIds": ["EVT-AGENT", "WRK-MEETING"],
+      "covers": ["sdk:client.AgentSession*", "sdk:client.ConnectAgentSseAsync", "table:agent_event", "table:inbox_event", "log@Features/Meeting/MonzeBot.Agent.cs", "log@Features/Meeting/MonzeBot.MeetingIngress.cs", "metric:monze.ingress.agent.*", "metric:monze.agent.*", "cfg:Mezon:AgentBaseUrl"],
+      "tests": ["AgentEventIdentityTests.*", "AgentEventPayloadTests.*", "AgentEventScopePolicyTests.*", "MeetingIngressItemTests.*", "PostgresMeetingCycleTests.*"]
+    },
+    {
+      "id": "REQ-MTG-004",
+      "area": "meeting",
+      "title": "Tóm tắt meeting: lấy transcript, retry có lease, soạn và gửi đúng một lần",
+      "legacyTestIds": ["CMD-SUMMARY", "WRK-SUMMARY"],
+      "covers": ["cmd:summary", "msg:TitleSummary", "msg:NoSummary", "msg:SummaryAdminOnly", "msg:SummaryFailed", "port:ITranscriptClient.*", "http:api/v2/*", "table:meeting_summary", "log@Features/Meeting/MeetingMaintenanceWorker.cs"],
+      "tests": ["HttpTranscriptClientTests.*", "MeetingSummaryComposerTests.*", "MeetingMaintenanceWorkerTests.*", "PostgresMeetingSummaryDeliveryTests.*"]
+    },
+    {
+      "id": "REQ-MTG-005",
+      "area": "meeting",
+      "title": "Sự kiện voice và channel cập nhật snapshot phòng voice",
+      "legacyTestIds": ["EVT-CHANNEL", "EVT-VOICE"],
+      "covers": ["sdk:client.Voice*", "sdk:client.ChannelCreated", "sdk:client.ChannelUpdated", "sdk:client.ChannelDeleted", "sdk:client.GetChannelAsync", "sdk:client.GetChannelDetailAsync", "sdk:client.ListChannelDescsAsync", "sdk:client.Channels", "log@Features/Meeting/MonzeBot.VoiceRooms.cs"],
+      "tests": ["VoiceSnapshotGuardTests.*"]
+    },
+    {
+      "id": "REQ-MTG-006",
+      "area": "meeting",
+      "title": "Repository meeting: vòng đời phiên, lease summary, inbox sự kiện",
+      "legacyTestIds": ["PORT-MEETING"],
+      "covers": ["port:IMeetingRepository.*"],
+      "tests": ["PostgresMeetingRepositoryTests.*", "PostgresMeetingCycleTests.*", "PostgresMeetingSummaryDeliveryTests.*"]
+    },
+    {
+      "id": "REQ-RL-001",
+      "area": "rate-limit",
+      "title": "Giới hạn tần suất lệnh theo bucket user/AI/meeting/admin, bảng có giới hạn",
+      "legacyTestIds": [],
+      "covers": ["cfg:Monze:RateLimit:*", "msg:RateLimited", "msg:TitleRateLimited"],
+      "tests": ["DomainRulesTests.*"]
+    },
+    {
+      "id": "REQ-INBOX-001",
+      "area": "inbox",
+      "title": "Inbox lệnh: claim một lần theo message, uncertain, purge",
+      "legacyTestIds": ["PORT-COMMAND-INBOX"],
+      "covers": ["port:ICommandInboxRepository.*", "table:command_inbox", "log@Hosting/MonzeBot.CommandInbox.cs"],
+      "tests": ["PostgresCommandInboxRepositoryTests.*"]
+    },
+    {
+      "id": "REQ-INBOX-002",
+      "area": "inbox",
+      "title": "Inbox tương tác: button và dropdown, actor được xác thực, claim một lần",
+      "legacyTestIds": ["PORT-INTERACTION-INBOX"],
+      "covers": ["port:IInteractionInboxRepository.*", "table:interaction_inbox", "log@Hosting/MonzeBot.InteractionInbox.cs", "sdk:client.MessageButtonClicked", "sdk:client.DropdownBoxSelected"],
+      "tests": ["PostgresInteractionInboxRepositoryTests.*", "InteractionAuthorizationTests.*"]
+    },
+    {
+      "id": "REQ-OUT-001",
+      "area": "outbox",
+      "title": "Outbox: claim theo lease, gửi, uncertain không gửi lại mù, retry có giới hạn",
+      "legacyTestIds": ["WRK-OUTBOX", "PORT-OUTBOX"],
+      "covers": ["port:IOutboxRepository.*", "table:outbox_delivery", "log@Hosting/MonzeBot.Outbox.cs", "metric:monze.outbox.*", "cfg:Monze:Outbox:*"],
+      "tests": ["PostgresOutboxRepositoryTests.*", "PostgresOutboxInvitationBindingTests.*", "MessageContentReplyTests.*"]
+    },
+    {
+      "id": "REQ-ING-001",
+      "area": "ingress",
+      "title": "Ingress message: lane cố định, thứ tự theo clan, đánh dấu gap khi rơi tin",
+      "legacyTestIds": ["EVT-MESSAGE", "WRK-INGRESS", "PORT-HISTORY"],
+      "covers": ["sdk:client.ChannelMessageReceived", "port:IEventIngressQueue.*", "port:IMessageHistoryRepository.*", "table:channel_policy", "log@Hosting/MonzeBot.Ingress.cs", "metric:monze.ingress.message*", "cfg:Monze:Queues:*", "cfg:Monze:SqliteDirectory"],
+      "tests": ["PartitionedIngressQueueTests.*", "MessageGapBatchTests.*", "PostgresMessageHistoryRepositoryTests.*"]
+    },
+    {
+      "id": "REQ-CONN-001",
+      "area": "connection",
+      "title": "Kết nối Mezon: login có retry, reconnect, discovery và join clan",
+      "legacyTestIds": ["PORT-CLAN"],
+      "covers": ["sdk:client.LoginAsync", "sdk:client.Connected", "sdk:client.Disconnected", "sdk:client.Reconnecting", "sdk:client.ConnectionState", "sdk:client.ListClanDescsAsync", "sdk:client.JoinClanAsync", "sdk:client.GetClanAsync", "sdk:client.Clans", "sdk:client.BotId", "sdk:client.Username", "port:IClanRegistryRepository.*", "table:clan_registry", "table:bot_flags", "log@Hosting/MonzeBot.Connection.cs", "metric:monze.socket.*", "cfg:Monze:Connection:*", "cfg:Mezon:BotId", "cfg:Mezon:Token"],
+      "tests": ["PostgresClanRegistryRepositoryTests.*"]
+    },
+    {
+      "id": "REQ-CACHE-001",
+      "area": "cache",
+      "title": "Cache read model L1/L2 (Redis): version, tombstone, fallback PostgreSQL",
+      "legacyTestIds": [],
+      "covers": ["port:IReadModelCache.*", "metric:monze.cache.*", "log@Monze.Infrastructure/Caching/*", "cfg:Monze:Redis", "cfg:Monze:EnvironmentName"],
+      "tests": ["MonzeL1CacheTests.*", "MonzeCacheKeyTests.*", "MonzeRedisIntegrationTests.*"]
+    },
+    {
+      "id": "REQ-DB-001",
+      "area": "database",
+      "title": "Schema PostgreSQL: migrate từ zero, checksum append-only, advisory lock",
+      "legacyTestIds": ["DB-MIGRATIONS"],
+      "covers": ["migration:*"],
+      "tests": ["MigrateCommandProcessTests.*", "Postgres*Tests.*"]
+    },
+    {
+      "id": "REQ-MIG-001",
+      "area": "database",
+      "title": "Lệnh migrate chạy thật trên DB rỗng, chỉ đọc cấu hình từ môi trường và lặp lại được",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-HOST-001",
+      "area": "hosting",
+      "title": "Đăng ký service production khớp snapshot đã commit",
+      "legacyTestIds": [],
+      "covers": ["hosted:*"],
+      "tests": []
+    },
+    {
+      "id": "REQ-HOST-002",
+      "area": "hosting",
+      "title": "Hosted service khởi động theo thứ tự: kiểm schema, bot, maintenance",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-HOST-003",
+      "area": "hosting",
+      "title": "Chế độ migrate không đăng ký hosted service",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-HOST-004",
+      "area": "hosting",
+      "title": "Host dựng cho test không bao giờ nạp file appsettings",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-HOST-005",
+      "area": "hosting",
+      "title": "File JSON được nạp sau cùng và ghi đè biến môi trường",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-HOST-006",
+      "area": "hosting",
+      "title": "Override service của test chạy sau đăng ký production",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-HOST-007",
+      "area": "hosting",
+      "title": "Đối số migrate chọn chế độ chỉ migrate",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-HOST-008",
+      "area": "hosting",
+      "title": "Thiếu Monze:Postgres thì dừng trước khi build host",
+      "legacyTestIds": [],
+      "covers": ["cfg:Monze:Postgres"],
+      "tests": []
+    },
+    {
+      "id": "REQ-HOST-009",
+      "area": "hosting",
+      "title": "Readiness theo từng host, chỉ hoàn tất một lần",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-HOST-010",
+      "area": "hosting",
+      "title": "Đồng hồ production là TimeProvider.System",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-HOST-011",
+      "area": "hosting",
+      "title": "Vòng đời bot: chờ readiness, đăng nhập, chạy worker, dừng và drain",
+      "legacyTestIds": [],
+      "covers": ["log@Hosting/MonzeBot.cs", "log@Hosting/MonzeBot.Lifecycle.cs"],
+      "tests": []
+    },
+    {
+      "id": "REQ-HOST-012",
+      "area": "hosting",
+      "title": "Log ra console và file theo ngày với mức log cấu hình được",
+      "legacyTestIds": [],
+      "covers": ["cfg:Monze:Logging:*"],
+      "tests": ["DailyFileLoggerTests.*"]
+    },
+    {
+      "id": "REQ-HOST-020",
+      "area": "hosting",
+      "title": "Chu kỳ worker giữ default và clamp như production",
+      "legacyTestIds": [],
+      "covers": ["cfg:Monze:Outbox:PollMilliseconds", "cfg:Monze:Roles:ScanIntervalSeconds"],
+      "tests": []
+    },
+    {
+      "id": "REQ-HOST-021",
+      "area": "hosting",
+      "title": "Tuỳ chọn client Mezon: gateway, transport, rate limit có clamp",
+      "legacyTestIds": [],
+      "covers": ["cfg:Mezon:Host", "cfg:Mezon:Port", "cfg:Mezon:UseSsl", "cfg:Mezon:Transport", "cfg:Mezon:RateLimit:*", "sdk:client.Options"],
+      "tests": []
+    },
+    {
+      "id": "REQ-HOST-022",
+      "area": "hosting",
+      "title": "Hook tuỳ biến client chạy sau cấu hình",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-TIME-001",
+      "area": "hosting",
+      "title": "Mọi đồng hồ, delay và timer đi qua TimeProvider được inject",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-OBS-001",
+      "area": "observability",
+      "title": "Metric chờ rate limit phía SDK theo bucket",
+      "legacyTestIds": [],
+      "covers": ["metric:monze.upstream.*"],
+      "tests": []
+    },
+    {
+      "id": "REQ-OBS-002",
+      "area": "observability",
+      "title": "Metric lệnh đang chạy và thời lượng theo module/kết quả, tag có giới hạn",
+      "legacyTestIds": [],
+      "covers": ["metric:monze.command.*"],
+      "tests": []
+    },
+    {
+      "id": "REQ-OBS-003",
+      "area": "observability",
+      "title": "Instrument mới không cấp phát khi có listener",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-PERF-001",
+      "area": "performance",
+      "title": "Đường nóng 0 B/op: callback ingress, TryWrite, limiter key đã có, L1 hit, CommandArguments",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-PERF-002",
+      "area": "performance",
+      "title": "GetPartition chỉ đúng lane nhận key",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-SEC-100",
+      "area": "security",
+      "title": "Output của test không mang appsettings*.json",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-SEC-101",
+      "area": "security",
+      "title": "Guard test chỉ cho PostgreSQL/Redis campaign trên loopback",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-SEC-102",
+      "area": "security",
+      "title": "Báo cáo campaign không chứa secret, DSN, token hay ID dài",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-RPT-001",
+      "area": "report",
+      "title": "Báo cáo có đủ mục 0–14",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-RPT-002",
+      "area": "report",
+      "title": "Thiếu bằng chứng thì verdict là evidence missing",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-RPT-003",
+      "area": "report",
+      "title": "Báo cáo xoá secret, DSN và ID dài",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-RPT-004",
+      "area": "report",
+      "title": "Gộp coverage cobertura theo assembly",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-RPT-005",
+      "area": "report",
+      "title": "Quét redaction phát hiện đúng các luật",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-RPT-006",
+      "area": "report",
+      "title": "Mục 7 liệt kê nhóm inventory, requirement chưa có test và TEST-ID cũ",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-TRACE-001",
+      "area": "traceability",
+      "title": "Mọi mục inventory được khai báo bởi requirement hoặc exclusion có lý do",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-TRACE-002",
+      "area": "traceability",
+      "title": "Pattern requirement không lỗi thời và mọi [Req] trỏ tới requirement đã khai báo",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    }
+  ]
+}

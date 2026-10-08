@@ -295,6 +295,11 @@ internal sealed class ReportRenderer
                     }
                 }
             }
+
+            foreach (var trace in traces)
+            {
+                TraceabilityDetails(md, trace.Root);
+            }
         }
 
         md.AppendLine();
@@ -310,6 +315,44 @@ internal sealed class ReportRenderer
             }
 
             md.AppendLine();
+        }
+    }
+
+    private void TraceabilityDetails(StringBuilder md, JsonElement trace)
+    {
+        if (trace.TryGetProperty("metrics", out var metrics) && metrics.ValueKind == JsonValueKind.Object)
+        {
+            md.AppendLine();
+            md.AppendLine($"Inventory {Num(metrics, "inventoryItems")} mục: {Num(metrics, "declared")} đã khai báo, {Num(metrics, "undeclared")} chưa khai báo, {Num(metrics, "mappedItems")} có test ({(metrics.TryGetProperty("mappedPercent", out var percent) ? MetricValue(percent) : "—")}%). Requirement có test: {Num(metrics, "requirementsWithTests")}/{Num(metrics, "requirements")}.");
+        }
+
+        if (trace.TryGetProperty("requirements", out var requirements) && requirements.ValueKind == JsonValueKind.Array)
+        {
+            var missing = requirements.EnumerateArray()
+                .Where(static requirement => requirement.TryGetProperty("tests", out var tests) && tests.ValueKind == JsonValueKind.Number && tests.GetInt32() == 0)
+                .Select(static requirement => $"{Str(requirement, "id")} ({Str(requirement, "title")})")
+                .ToList();
+            if (missing.Count > 0)
+            {
+                md.AppendLine();
+                md.AppendLine($"Requirement chưa có test: {Cell(string.Join("; ", missing))}");
+            }
+        }
+
+        if (trace.TryGetProperty("legacy", out var legacy) && legacy.ValueKind == JsonValueKind.Array && legacy.GetArrayLength() > 0)
+        {
+            md.AppendLine();
+            md.AppendLine($"### {N(legacy.GetArrayLength())} TEST-ID của capability-inventory.json");
+            md.AppendLine();
+            md.AppendLine("| TEST-ID | Requirement | Số test |");
+            md.AppendLine("|---|---|---|");
+            foreach (var row in legacy.EnumerateArray())
+            {
+                var ids = row.TryGetProperty("requirements", out var list) && list.ValueKind == JsonValueKind.Array
+                    ? string.Join(", ", list.EnumerateArray().Select(static id => id.GetString()))
+                    : string.Empty;
+                md.AppendLine($"| {Cell(Str(row, "testId"))} | {Cell(ids)} | {Num(row, "tests")} |");
+            }
         }
     }
 

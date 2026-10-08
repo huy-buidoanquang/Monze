@@ -311,6 +311,7 @@ try {
     $env:MONZE_CAMPAIGN_ID = $campaignId
     $env:MONZE_CAMPAIGN_STRICT = '1'
     $env:MONZE_CASE_LEDGER_DIR = Join-Path $raw 'ledgers'
+    $env:MONZE_CAMPAIGN_ARTIFACTS = $raw
     $env:MONZE_PBT_SCALE = if ($Deep) { '10' } else { '1' }
     if ($Seed) { $env:MONZE_CAMPAIGN_SEED = $Seed }
 
@@ -366,7 +367,7 @@ catch {
 }
 finally {
     # ------------------------------------------------------------ cleanup (always)
-    foreach ($name in 'MONZE_CAMPAIGN_ID', 'MONZE_CAMPAIGN_STRICT', 'MONZE_CASE_LEDGER_DIR', 'MONZE_PBT_SCALE', 'MONZE_CAMPAIGN_SEED', 'MONZE_TEST_POSTGRES', 'MONZE_REDIS_CONNECTION') {
+    foreach ($name in 'MONZE_CAMPAIGN_ID', 'MONZE_CAMPAIGN_STRICT', 'MONZE_CASE_LEDGER_DIR', 'MONZE_CAMPAIGN_ARTIFACTS', 'MONZE_PBT_SCALE', 'MONZE_CAMPAIGN_SEED', 'MONZE_TEST_POSTGRES', 'MONZE_REDIS_CONNECTION') {
         Remove-Item "Env:$name" -ErrorAction SilentlyContinue
     }
     if (-not $KeepContainers) {

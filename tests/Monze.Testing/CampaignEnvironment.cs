@@ -12,6 +12,7 @@ public static class CampaignEnvironment
     public const string LedgerDirectoryVariable = "MONZE_CASE_LEDGER_DIR";
     public const string PbtScaleVariable = "MONZE_PBT_SCALE";
     public const string SeedVariable = "MONZE_CAMPAIGN_SEED";
+    public const string ArtifactDirectoryVariable = "MONZE_CAMPAIGN_ARTIFACTS";
 
     public static string Id => Read(IdVariable) ?? "local";
 
@@ -33,6 +34,12 @@ public static class CampaignEnvironment
     }
 
     public static string? Seed => Read(SeedVariable);
+
+    /// <summary>
+    /// The campaign raw/ folder; a tier writes a monze.artifact.v1 file to
+    /// raw/&lt;kind&gt;/ here. Null outside a campaign.
+    /// </summary>
+    public static string? ArtifactDirectory => Read(ArtifactDirectoryVariable);
 
     private static string? Read(string name)
     {
