@@ -17,11 +17,6 @@ public sealed partial class MonzeBot
         MezonClient client,
         CancellationToken cancellationToken)
     {
-        var pollMilliseconds = Math.Clamp(
-            _configuration.GetValue("Monze:Outbox:PollMilliseconds", 250),
-            100,
-            5_000);
-
         while (!cancellationToken.IsCancellationRequested)
         {
             try
@@ -39,7 +34,7 @@ public sealed partial class MonzeBot
                 _logger.LogWarning(ex, "Outbox worker iteration failed; retrying.");
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(pollMilliseconds), _time, cancellationToken);
+            await Task.Delay(_timings.OutboxPollInterval, _time, cancellationToken);
         }
     }
 

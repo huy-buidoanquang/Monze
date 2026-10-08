@@ -43,6 +43,8 @@ public sealed partial class MonzeBot : BackgroundService
     private readonly MonzeCommandRateLimiter _commandRateLimiter;
     private readonly StartupReadiness _readiness;
     private readonly TimeProvider _time;
+    private readonly MonzeWorkerTimings _timings;
+    private readonly MonzeClientCustomization? _clientCustomization;
     private readonly IEventIngressQueue<ChannelMessageEventData> _messageIngress;
     private readonly Channel<MessageGapIngressItem> _messageGapIngress;
     private readonly Channel<MeetingIngressItem> _meetingIngress;
@@ -90,7 +92,9 @@ public sealed partial class MonzeBot : BackgroundService
         MonzeCommandRateLimiter commandRateLimiter,
         StartupReadiness readiness,
         TimeProvider time,
-        ILogger<MonzeBot> logger)
+        MonzeWorkerTimings timings,
+        ILogger<MonzeBot> logger,
+        MonzeClientCustomization? clientCustomization = null)
     {
         _configuration = configuration;
         _app = app;
@@ -115,7 +119,9 @@ public sealed partial class MonzeBot : BackgroundService
         _commandRateLimiter = commandRateLimiter;
         _readiness = readiness;
         _time = time;
+        _timings = timings;
         _logger = logger;
+        _clientCustomization = clientCustomization;
         var weakSelf = new WeakReference<MonzeBot>(this);
         MonzeMetrics.RegisterRuntimeState(
             () => weakSelf.TryGetTarget(out var bot)
@@ -202,30 +208,7 @@ public sealed partial class MonzeBot : BackgroundService
             _configuration["Monze:EnvironmentName"] ?? "dev");
         _messages = await SqliteMessageStore.OpenAsync(path, stoppingToken);
 
-        var options = new MezonClientOptions(
-            botId,
-            token,
-            _configuration["Mezon:Host"] ?? "gw.mezon.ai",
-            _configuration["Mezon:Port"] ?? "443",
-            _configuration.GetValue("Mezon:UseSsl", true))
-        {
-            TransportType = ResolveTransportType(_configuration["Mezon:Transport"]),
-            AgentEventUrl = _configuration["Mezon:AgentBaseUrl"] ?? string.Empty,
-            MaxTransportRequestsPerSecond = Math.Clamp(
-                _configuration.GetValue("Mezon:RateLimit:RequestsPerSecond", 60),
-                1,
-                1000),
-            MaxTransportRequestsPerMinute = Math.Clamp(
-                _configuration.GetValue("Mezon:RateLimit:RequestsPerMinute", 500),
-                1,
-                10000),
-            MaxConnectRequestsPerSecond = Math.Clamp(
-                _configuration.GetValue("Mezon:RateLimit:ConnectRequestsPerSecond", 2),
-                1,
-                100),
-            SocketHandlerTimeoutInMilliseconds = null
-        };
-
+        var options = CreateClientOptions(_configuration, botId, token, _clientCustomization);
         await using var client = new MezonClient(options);
         _app.AttachRoleGateway(new SdkRoleGateway(client, _logger));
         ConfigureCommands(client);
@@ -273,7 +256,7 @@ public sealed partial class MonzeBot : BackgroundService
                     _logger.LogWarning(ex, "Monze worker iteration failed; retrying.");
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(1), _time, runtimeToken);
+                await Task.Delay(_timings.SchedulerInterval, _time, runtimeToken);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -309,6 +292,39 @@ public sealed partial class MonzeBot : BackgroundService
                 _messageGapIngress.Writer.TryComplete();
             }
         }
+    }
+
+    internal static MezonClientOptions CreateClientOptions(
+        IConfiguration configuration,
+        long botId,
+        string token,
+        MonzeClientCustomization? customization)
+    {
+        var options = new MezonClientOptions(
+            botId,
+            token,
+            configuration["Mezon:Host"] ?? "gw.mezon.ai",
+            configuration["Mezon:Port"] ?? "443",
+            configuration.GetValue("Mezon:UseSsl", true))
+        {
+            TransportType = ResolveTransportType(configuration["Mezon:Transport"]),
+            AgentEventUrl = configuration["Mezon:AgentBaseUrl"] ?? string.Empty,
+            MaxTransportRequestsPerSecond = Math.Clamp(
+                configuration.GetValue("Mezon:RateLimit:RequestsPerSecond", 60),
+                1,
+                1000),
+            MaxTransportRequestsPerMinute = Math.Clamp(
+                configuration.GetValue("Mezon:RateLimit:RequestsPerMinute", 500),
+                1,
+                10000),
+            MaxConnectRequestsPerSecond = Math.Clamp(
+                configuration.GetValue("Mezon:RateLimit:ConnectRequestsPerSecond", 2),
+                1,
+                100),
+            SocketHandlerTimeoutInMilliseconds = null
+        };
+        customization?.Configure(options);
+        return options;
     }
 
     private static TransportType ResolveTransportType(string? configured)

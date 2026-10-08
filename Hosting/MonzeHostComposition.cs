@@ -195,6 +195,7 @@ internal static class MonzeHostComposition
                     sp.GetRequiredService<TimeProvider>());
             });
 
+            builder.Services.AddSingleton(MonzeWorkerTimings.From(builder.Configuration));
             builder.Services.AddSingleton<StartupReadiness>();
             builder.Services.AddHostedService<StartupSchemaValidator>();
             builder.Services.AddHostedService<MonzeBot>();

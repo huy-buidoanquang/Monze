@@ -95,7 +95,7 @@ public sealed partial class MonzeBot
     private async Task MarkCommandUncertainAsync(CommandInboxLease lease)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_runtimeToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        timeout.CancelAfter(_timings.UncertainMarkTimeout);
         try
         {
             if (!await _commandInbox.MarkUncertainAsync(lease, timeout.Token))

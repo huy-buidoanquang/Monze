@@ -101,7 +101,7 @@ public sealed partial class MonzeBot
     private async Task MarkInteractionUncertainAsync(InteractionInboxLease lease)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_runtimeToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        timeout.CancelAfter(_timings.UncertainMarkTimeout);
         try
         {
             if (!await _interactionInbox.MarkUncertainAsync(lease, timeout.Token))
