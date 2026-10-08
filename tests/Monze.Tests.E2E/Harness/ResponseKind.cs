@@ -29,5 +29,18 @@ internal enum ResponseKind
     Delete,
 
     /// <summary>A click: one new public message plus one update of the clicked ephemeral.</summary>
-    UpdateAndPublic
+    UpdateAndPublic,
+
+    /// <summary>
+    /// A command message delivered again (gateway redelivery, second
+    /// instance): no output, and its single command_inbox row is left as it was.
+    /// </summary>
+    Duplicate,
+
+    /// <summary>
+    /// A click the bot accepted: exactly one update of the clicked message to
+    /// the actor, which the platform refused (the message is not the actor's
+    /// ephemeral). Used to record forged clicks Monze lets through.
+    /// </summary>
+    UpdateRejected
 }

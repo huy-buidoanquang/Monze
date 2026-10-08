@@ -121,10 +121,15 @@ public sealed partial class SimWireCatalogTests
         Assert.True(unknown.Count == 0, "Wire operations the simulator neither models nor excludes: " + string.Join(", ", unknown));
         Assert.Equal(new[] { SimOperations.AgentSse }, operations.Where(SimOperations.NotModelled.ContainsKey).ToArray());
 
-        // The excluded operation is refused, not silently ignored.
+        // The excluded operation goes only to a loopback HTTP fake (SimHttpHost); anything else is refused.
         var simulator = new MezonSimulator(SmokeWorld.Create());
-        var options = new MezonClientOptions(SmokeWorld.BotId, SmokeWorld.BotToken) { AgentEventUrl = "http://127.0.0.1:9/agent" };
-        Assert.Throws<InvalidOperationException>(() => simulator.Configure(options));
+        foreach (var url in new[] { "https://agent.example.test/agent", "http://10.0.0.1:8002", "https://127.0.0.1:9/agent", "http://user:pw@127.0.0.1:9" })
+        {
+            var refused = new MezonClientOptions(SmokeWorld.BotId, SmokeWorld.BotToken) { AgentEventUrl = url };
+            Assert.Throws<InvalidOperationException>(() => simulator.Configure(refused));
+        }
+
+        simulator.Configure(new MezonClientOptions(SmokeWorld.BotId, SmokeWorld.BotToken) { AgentEventUrl = "http://127.0.0.1:9/agent" });
 
         // Names the simulator uses are real SDK wire names.
         Assert.All(SimOperations.Apis, static api => Assert.True(MezonApiMap.TryGetIndex(api, out _), $"{api} is not in MezonApiMap"));
@@ -312,8 +317,12 @@ public sealed partial class SimWireCatalogTests
         var member = SmokeWorld.MemberId;
         var general = SmokeWorld.GeneralId;
 
-        await host.Inbound.SayAsync(SmokeWorld.ClanId, general, member, "*monze help");
+        var help = await host.Inbound.SayAsync(SmokeWorld.ClanId, general, member, "*monze help");
         var card = await host.Recorder.WaitForAsync(action => action.Kind == SimActionKind.SendEphemeral && action.ChannelId == general, Timeout);
+
+        // Monze binds the card to the member only once the send was acked; a
+        // click before that is (correctly) refused, so wait for the command to finish.
+        await host.WaitForCommandStatusAsync(SmokeWorld.ClanId, general, help.MessageId, Timeout);
         await host.Inbound.ClickButtonAsync(SmokeWorld.ClanId, general, card.MessageId, member, MonzeButtonId.HelpMeeting);
         await host.Recorder.WaitForAsync(action => action.Kind == SimActionKind.UpdateEphemeral && action.MessageId == card.MessageId, Timeout);
         await host.Inbound.ClickButtonAsync(SmokeWorld.ClanId, general, card.MessageId, member, MonzeButtonId.HelpClose);

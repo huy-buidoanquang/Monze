@@ -100,6 +100,36 @@ public sealed class SimInbound
     }
 
     /// <summary>
+    /// Pushes a stored clan channel message again, unchanged (same message id),
+    /// as a gateway does when it redelivers after a reconnect. Mentions keep
+    /// their user ids but not their text positions.
+    /// </summary>
+    public Task<SimPush> RedeliverMessageAsync(long messageId)
+    {
+        var message = World.FindMessage(messageId);
+        if (message is null || message.Deleted || message.ClanId == 0)
+        {
+            throw new ArgumentException($"Message {messageId} is not a live clan channel message.", nameof(messageId));
+        }
+
+        return _simulator.PushAsync(
+            SimPushKind.ChannelMessage,
+            new Envelope { ChannelMessage = _simulator.ToChannelMessage(message) },
+            session => session.HasJoinedClan(message.ClanId),
+            new SimAction
+            {
+                Kind = SimActionKind.Push,
+                Operation = nameof(SimPushKind.ChannelMessage),
+                ClanId = message.ClanId,
+                ChannelId = message.ChannelId,
+                MessageId = message.Id,
+                TargetUserId = message.SenderId,
+                ContentJson = message.ContentJson,
+                ReplyToMessageId = message.ReplyToMessageId
+            });
+    }
+
+    /// <summary>
     /// A user clicks a button of a bot message. Only the receiver can click an
     /// ephemeral message unless <paramref name="allowInvisible"/> forges it.
     /// </summary>

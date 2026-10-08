@@ -36,14 +36,20 @@
 // EphemeralMessageSend codes 12/14/15, ChannelMessageRemove; pushes for
 // ChannelMessage (clan or DM), MessageButtonClicked (honest or forged, as
 // mezon-api forwards it unchanged), DropdownBoxSelected, AddClanUserEvent,
-// Voice joined/leaved/ended and Channel created/updated/deleted; faults
+// Voice joined/leaved/ended and Channel created/updated/deleted; redelivery
+// of a stored channel message (SimInbound.RedeliverMessageAsync); faults
 // (delay, error, dropped ack, socket close, refused handshake, duplicate,
 // reordered and dropped pushes).
 //
+// HTTP dependencies (Agent SSE, transcript login/refresh/summary, AI chat
+// completions) do not go through the SDK seams; SimHttpHost fakes them on a
+// loopback Kestrel port with scriptable faults. Configure accepts a non-empty
+// AgentEventUrl only when it is an http URL on 127.0.0.1, [::1] or localhost.
+//
 // Not modelled (fails closed or is refused): every other socket API and
 // realtime envelope (recorded in SimRecorder.UnmodelledCalls and answered
-// with Unimplemented or not at all); Agent SSE (own HttpClient, Configure
-// refuses a non-empty AgentEventUrl); group DMs and the echo of bot DM sends; role metadata and
+// with Unimplemented or not at all); any non-loopback Agent URL; group DMs
+// and the echo of bot DM sends; role metadata and
 // permission edits; channel permissions beyond clan membership; paging
 // cursors; echo of message updates and deletes; MMN/ZK.
 using System.Security.Cryptography;
@@ -121,10 +127,10 @@ public sealed class MezonSimulator : IAsyncDisposable
     public void Configure(MezonClientOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        if (!string.IsNullOrWhiteSpace(options.AgentEventUrl))
+        if (!string.IsNullOrWhiteSpace(options.AgentEventUrl) && !IsLoopbackHttp(options.AgentEventUrl))
         {
             throw new InvalidOperationException(
-                "Agent SSE is not modelled by the Monze simulator (it uses its own HttpClient). Leave Mezon:AgentBaseUrl empty.");
+                "Agent SSE uses its own HttpClient; the simulator only allows Mezon:AgentBaseUrl pointing at a loopback http fake (SimHttpHost). Leave it empty otherwise.");
         }
 
         options.Host = Options.Host;
@@ -164,6 +170,13 @@ public sealed class MezonSimulator : IAsyncDisposable
 
         _pushGate.Dispose();
     }
+
+    /// <summary>An absolute http:// URL whose host is 127.0.0.1, [::1] or localhost (no credentials).</summary>
+    internal static bool IsLoopbackHttp(string url)
+        => Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            && uri.Scheme == Uri.UriSchemeHttp
+            && string.IsNullOrEmpty(uri.UserInfo)
+            && (uri.IsLoopback && (uri.Host == "localhost" || System.Net.IPAddress.TryParse(uri.Host.Trim('[', ']'), out _)));
 
     internal static string MeetingCode(SimChannel channel)
         => channel.IsVoice ? $"sim-room-{channel.Id}" : string.Empty;

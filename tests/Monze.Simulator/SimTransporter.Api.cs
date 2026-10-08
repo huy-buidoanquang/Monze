@@ -92,7 +92,7 @@ public sealed partial class SimTransporter
         return new ApiCall(draft, () =>
         {
             var list = new ClanDescList();
-            foreach (var clan in World.ClansOf(BotId))
+            foreach (var clan in World.ClansOf(BotId).Take(_simulator.Options.ClanDiscoveryLimit ?? int.MaxValue))
             {
                 list.Clandesc.Add(new ClanDesc
                 {

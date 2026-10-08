@@ -16,23 +16,41 @@ namespace Monze.Simulator;
 /// appsettings), worker intervals are short by default, and start-up returns
 /// once the bot logged in, discovered the seeded clans and joined them.
 /// Disposing stops the host, closes the simulator and drops the database.
-/// E2E tests, load runs and chaos scenarios share it.
+/// E2E tests, load runs and chaos scenarios share it. A host started on an
+/// existing database, simulator or data directory
+/// (<see cref="SimulatedMonzeHostOptions.Database"/>,
+/// <see cref="SimulatedMonzeHostOptions.SharedSimulator"/>,
+/// <see cref="SimulatedMonzeHostOptions.DataDirectory"/>) leaves them in place
+/// when disposed.
 /// </summary>
 public sealed class SimulatedMonzeHost : IAsyncDisposable
 {
     private const string RefreshCompleted = "Monze clan registry refresh completed";
     private readonly IHost _host;
     private readonly DirectoryInfo _root;
+    private readonly Ownership _owns;
+    private readonly IReadOnlySet<SimTransporter> _foreignSessions;
     private int _hostStopped;
     private bool _disposed;
 
-    private SimulatedMonzeHost(IHost host, MezonSimulator simulator, HostLogSink logs, CampaignDatabase database, DirectoryInfo root)
+    private SimulatedMonzeHost(IHost host, MezonSimulator simulator, HostLogSink logs, CampaignDatabase database, DirectoryInfo root, Ownership owns, IReadOnlySet<SimTransporter> foreignSessions)
     {
         _host = host;
         Simulator = simulator;
         Logs = logs;
         Database = database;
         _root = root;
+        _owns = owns;
+        _foreignSessions = foreignSessions;
+    }
+
+    [Flags]
+    private enum Ownership
+    {
+        None = 0,
+        Database = 1,
+        Simulator = 2,
+        Root = 4
     }
 
     public MezonSimulator Simulator { get; }
@@ -49,22 +67,36 @@ public sealed class SimulatedMonzeHost : IAsyncDisposable
 
     public IServiceProvider Services => _host.Services;
 
+    /// <summary>Content root of this host: logs and the SQLite message store (reuse it for a restart).</summary>
+    public DirectoryInfo DataDirectory => _root;
+
     /// <summary>
     /// Creates and migrates a database on the guarded campaign
-    /// <paramref name="server"/>, starts Monze on the simulator and waits
-    /// until it joined the clans.
+    /// <paramref name="server"/> (unless <see cref="SimulatedMonzeHostOptions.Database"/>
+    /// is given), starts Monze on the simulator and waits until its own
+    /// session joined the clans.
     /// </summary>
     public static async Task<SimulatedMonzeHost> StartAsync(SimWorld world, string server, string tag, SimulatedMonzeHostOptions? options = null)
     {
         options ??= new SimulatedMonzeHostOptions();
-        var database = await CampaignDatabase.CreateEmptyAsync(server, tag);
-        var root = Directory.CreateTempSubdirectory("monze-sim-host-");
+        if (options.SharedSimulator is { } shared && !ReferenceEquals(shared.World, world))
+        {
+            throw new ArgumentException("The shared simulator serves a different world.", nameof(world));
+        }
+
+        var owns = (options.Database is null ? Ownership.Database : Ownership.None)
+            | (options.SharedSimulator is null ? Ownership.Simulator : Ownership.None)
+            | (options.DataDirectory is null ? Ownership.Root : Ownership.None);
+        var database = options.Database ?? await CampaignDatabase.CreateEmptyAsync(server, tag);
+        var root = options.DataDirectory ?? Directory.CreateTempSubdirectory("monze-sim-host-");
         IHost? host = null;
-        var simulator = new MezonSimulator(world, options.Simulator);
+        var simulator = options.SharedSimulator ?? new MezonSimulator(world, options.Simulator);
+        var foreignSessions = simulator.Sessions.ToHashSet();
         try
         {
-            await using (var dataSource = NpgsqlDataSource.Create(database.ConnectionString))
+            if (owns.HasFlag(Ownership.Database))
             {
+                await using var dataSource = NpgsqlDataSource.Create(database.ConnectionString);
                 await PostgresMigrator.ApplyAsync(dataSource, database.ConnectionString, CancellationToken.None);
             }
 
@@ -74,8 +106,14 @@ public sealed class SimulatedMonzeHost : IAsyncDisposable
             }
 
             options.Faults?.Invoke(simulator.Faults);
+            options.Prepare?.Invoke(simulator);
             var logs = options.Logs ?? new HostLogSink();
             var configuration = Configuration(world, simulator, database, root);
+            if (options.MonzeConnectionString is { } map)
+            {
+                configuration["Monze:Postgres"] = map(database.ConnectionString);
+            }
+
             foreach (var (key, value) in options.Configuration)
             {
                 configuration[key] = value;
@@ -119,19 +157,34 @@ public sealed class SimulatedMonzeHost : IAsyncDisposable
             });
             host = builder.Build();
             await host.StartAsync();
-            var started = new SimulatedMonzeHost(host, simulator, logs, database, root);
+            var started = new SimulatedMonzeHost(host, simulator, logs, database, root, owns, foreignSessions);
             await started.WaitUntilReadyAsync(options.StartTimeout);
             return started;
         }
         catch
         {
             await StopAsync(host);
-            await simulator.DisposeAsync();
-            await database.DisposeAsync();
-            DeleteQuietly(root);
+            if (owns.HasFlag(Ownership.Simulator))
+            {
+                await simulator.DisposeAsync();
+            }
+
+            if (owns.HasFlag(Ownership.Database))
+            {
+                await database.DisposeAsync();
+            }
+
+            if (owns.HasFlag(Ownership.Root))
+            {
+                DeleteQuietly(root);
+            }
+
             throw;
         }
     }
+
+    /// <summary>The simulated sockets this host's MezonClient opened (a shared simulator also has others).</summary>
+    public IReadOnlyList<SimTransporter> OwnSessions => Simulator.Sessions.Where(session => !_foreignSessions.Contains(session)).ToList();
 
     /// <summary>Polls command_inbox until the command left 'processing'; returns its status.</summary>
     public async Task<string> WaitForCommandStatusAsync(long clanId, long channelId, long messageId, TimeSpan timeout)
@@ -234,9 +287,20 @@ public sealed class SimulatedMonzeHost : IAsyncDisposable
 
         _disposed = true;
         await StopHostAsync();
-        await Simulator.DisposeAsync();
-        await Database.DisposeAsync();
-        DeleteQuietly(_root);
+        if (_owns.HasFlag(Ownership.Simulator))
+        {
+            await Simulator.DisposeAsync();
+        }
+
+        if (_owns.HasFlag(Ownership.Database))
+        {
+            await Database.DisposeAsync();
+        }
+
+        if (_owns.HasFlag(Ownership.Root))
+        {
+            DeleteQuietly(_root);
+        }
     }
 
     private async Task WaitUntilReadyAsync(TimeSpan startTimeout)
@@ -251,8 +315,10 @@ public sealed class SimulatedMonzeHost : IAsyncDisposable
 
         await ready;
 
-        // Clan joins can still be in flight when the refresh is logged (slow acks).
-        while (World.ClansOf(World.Bot.Id).FirstOrDefault(clan => !Simulator.ConnectedSessions.Any(session => session.HasJoinedClan(clan.Id))) is { } missing)
+        // Clan joins can still be in flight when the refresh is logged (slow
+        // acks). Only discoverable clans can be joined (ClanDiscoveryLimit).
+        var discoverable = World.ClansOf(World.Bot.Id).Take(Simulator.Options.ClanDiscoveryLimit ?? int.MaxValue).ToList();
+        while (discoverable.FirstOrDefault(clan => !OwnSessions.Any(session => session.IsConnected && session.HasJoinedClan(clan.Id))) is { } missing)
         {
             if (timeout.IsCancellationRequested)
             {

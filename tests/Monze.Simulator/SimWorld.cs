@@ -22,6 +22,7 @@ public sealed class SimWorld
     private readonly Dictionary<long, SimRole> _roles = [];
     private readonly Dictionary<long, HashSet<long>> _voice = [];
     private readonly Dictionary<long, SimMessage> _messages = [];
+    private readonly Queue<long> _messageOrder = new();
     private readonly Dictionary<long, long> _directPeers = [];
     private long _nextId = GeneratedIdBase;
     private SimBotIdentity? _bot;
@@ -502,11 +503,29 @@ public sealed class SimWorld
         }
     }
 
+    /// <summary>
+    /// When set, only about the latest this-many messages are kept (long load
+    /// and soak runs); older ones can no longer be clicked, replied to or listed.
+    /// </summary>
+    public int? MessageRetention { get; set; }
+
     internal SimMessage StoreMessage(SimMessage message)
     {
         lock (_gate)
         {
-            _messages[message.Id] = message;
+            if (_messages.TryAdd(message.Id, message))
+            {
+                _messageOrder.Enqueue(message.Id);
+                while (MessageRetention is int limit && _messageOrder.Count > limit)
+                {
+                    _messages.Remove(_messageOrder.Dequeue());
+                }
+            }
+            else
+            {
+                _messages[message.Id] = message;
+            }
+
             return message;
         }
     }

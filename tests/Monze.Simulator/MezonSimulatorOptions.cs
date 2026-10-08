@@ -41,6 +41,12 @@ public sealed class MezonSimulatorOptions
     /// </summary>
     public Func<string, TimeSpan>? ResponseLatency { get; init; }
 
+    /// <summary>
+    /// Most clans ListClanDescs returns; the current Mezon discovery response
+    /// is capped at 100 entries (docs/capacity-gate.md). Null lifts the cap.
+    /// </summary>
+    public int? ClanDiscoveryLimit { get; init; } = 100;
+
     /// <summary>Lifetime of issued session tokens.</summary>
     public TimeSpan SessionLifetime { get; init; } = TimeSpan.FromHours(24);
 

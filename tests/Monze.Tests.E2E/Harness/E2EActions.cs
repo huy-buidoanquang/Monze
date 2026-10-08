@@ -22,7 +22,14 @@ internal static class E2EActions
         Action<IServiceCollection>? services = null,
         bool seedDelegate = false,
         Action<SimFaultPlan>? faults = null,
-        Func<MonzeWorkerTimings, MonzeWorkerTimings>? timings = null)
+        Func<MonzeWorkerTimings, MonzeWorkerTimings>? timings = null,
+        MezonSimulatorOptions? simulatorOptions = null,
+        SimHttpHost? http = null,
+        bool agent = true,
+        bool ai = true,
+        Monze.Testing.Postgres.CampaignDatabase? database = null,
+        MezonSimulator? simulator = null,
+        DirectoryInfo? dataDirectory = null)
     {
         var settings = new Dictionary<string, string?>
         {
@@ -36,19 +43,87 @@ internal static class E2EActions
             settings[key] = value;
         }
 
+        if (http is not null)
+        {
+            if (agent)
+            {
+                settings["Mezon:AgentBaseUrl"] = http.BaseUrl;
+            }
+
+            if (ai)
+            {
+                settings["Monze:Ai:BaseUrl"] = http.BaseUrl;
+            }
+        }
+
         foreach (var (key, value) in configuration ?? new Dictionary<string, string?>())
         {
             settings[key] = value;
         }
 
         return MonzeE2EHost.StartAsync(
-            world ?? AreaWorld.Create(),
+            simulator?.World ?? world ?? AreaWorld.Create(),
             tag,
+            simulatorOptions: simulatorOptions,
             faults: faults,
             configuration: settings,
             services: services,
             seed: seedDelegate ? AreaWorld.SeedDelegateAsync : null,
-            timings: timings);
+            timings: timings,
+            database: database,
+            simulator: simulator,
+            dataDirectory: dataDirectory,
+            http: http);
+    }
+
+    /// <summary>
+    /// A fake for Monze's HTTP dependencies that accepts the area bot's
+    /// credentials and the AI key canary.
+    /// </summary>
+    public static Task<SimHttpHost> HttpAsync(Func<SimAiRequest, string>? aiReply = null)
+        => SimHttpHost.StartAsync(new SimHttpHostOptions
+        {
+            BotId = AreaWorld.BotId,
+            BotToken = E2ECanaries.MezonToken,
+            AiApiKey = E2ECanaries.AiApiKey,
+            AiReply = aiReply ?? (static request => $"Kết quả mô phỏng ({request.Input?.Length ?? 0} ký tự).")
+        });
+
+    /// <summary>
+    /// Sends a command that every connected bot session receives (two
+    /// instances on one simulator) and waits until its command_inbox row left
+    /// 'processing'.
+    /// </summary>
+    public static async Task<SimPush> CommandAnySessionAsync(
+        MonzeE2EHost host,
+        long channelId,
+        long userId,
+        string text,
+        long clanId = AreaWorld.ClanId)
+    {
+        var push = await host.Inbound.SayAsync(clanId, channelId, userId, text);
+        if (push.DeliveredSessions < 1)
+        {
+            throw new InvalidOperationException($"Command '{text}' reached no bot session.");
+        }
+
+        await host.WaitForCommandStatusAsync(clanId, channelId, push.MessageId, E2EOracles.Timeout);
+        return push;
+    }
+
+    /// <summary>Polls <paramref name="condition"/> until it holds.</summary>
+    public static async Task WaitUntilAsync(MonzeE2EHost host, Func<Task<bool>> condition, string what, TimeSpan? timeout = null)
+    {
+        var deadline = DateTimeOffset.UtcNow + (timeout ?? E2EOracles.Timeout);
+        while (!await condition())
+        {
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                throw new TimeoutException($"Timed out waiting for {what}.{Environment.NewLine}{host.Recorder.Describe(40)}{Environment.NewLine}{host.Logs.Describe(40)}{Environment.NewLine}{host.Http?.Describe() ?? string.Empty}");
+            }
+
+            await Task.Delay(50);
+        }
     }
 
     /// <summary>Sends a command and waits until its command_inbox row left 'processing'.</summary>

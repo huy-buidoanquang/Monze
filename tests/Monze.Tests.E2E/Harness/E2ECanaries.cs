@@ -7,8 +7,9 @@ namespace Monze.Tests.E2E.Harness;
 /// with, so the oracles can prove none of them reaches a message or a log
 /// line. Mezon:Token is the simulated bot token (it must match for login);
 /// Monze:Ai:ApiKey is set without Monze:Ai:BaseUrl, which keeps the AI
-/// provider unconfigured and therefore off the network. The agent and
-/// transcript client use the same Mezon token. The campaign database
+/// provider unconfigured, unless a workflow points the base URL at the
+/// loopback SimHttpHost (which then checks the key as Bearer). The Agent
+/// stream and transcript client use the same Mezon token. The campaign database
 /// password (part of Monze:Postgres) is checked as a real secret as well.
 /// </summary>
 internal static class E2ECanaries

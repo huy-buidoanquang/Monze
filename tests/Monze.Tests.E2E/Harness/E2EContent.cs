@@ -9,9 +9,11 @@ internal static class E2EContent
     public static MessageContent Parse(SimAction action) => MessageContent.Parse(action.ContentJson!);
 
     /// <summary>Text, embed titles, descriptions, field names and values, in order, as one string.</summary>
-    public static string Visible(SimAction action)
+    public static string Visible(SimAction action) => Visible(Parse(action));
+
+    /// <summary>Text, embed titles, descriptions, field names and values, in order, as one string.</summary>
+    public static string Visible(MessageContent content)
     {
-        var content = Parse(action);
         var parts = new List<string>();
         if (!string.IsNullOrEmpty(content.Text))
         {
@@ -39,5 +41,24 @@ internal static class E2EContent
         var rows = (content.Components ?? []).SelectMany(static row => row.Components);
         var fields = (content.Embeds ?? []).SelectMany(static embed => embed.Fields ?? []).SelectMany(static field => field.Buttons ?? []);
         return rows.Concat(fields).OfType<ButtonMessageComponent>().Select(static button => button.Id).ToList();
+    }
+
+    /// <summary>
+    /// Whether the content carries a component a user can act on (button,
+    /// select, input, date picker, radio), the rule ReplyCommandAsync uses
+    /// to answer privately.
+    /// </summary>
+    public static bool IsInteractive(MessageContent content)
+    {
+        static bool Interactive(MessageComponent component)
+            => component.ComponentType is MessageComponentType.Button
+                or MessageComponentType.Select
+                or MessageComponentType.Input
+                or MessageComponentType.DatePicker
+                or MessageComponentType.Radio;
+
+        return (content.Components ?? []).SelectMany(static row => row.Components).Any(Interactive)
+            || (content.Embeds ?? []).SelectMany(static embed => embed.Fields ?? [])
+                .Any(static field => (field.Input is { } input && Interactive(input)) || (field.Buttons ?? []).Any(Interactive));
     }
 }

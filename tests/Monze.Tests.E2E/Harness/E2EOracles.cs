@@ -19,13 +19,15 @@ namespace Monze.Tests.E2E.Harness;
 /// <list type="number">
 /// <item>No unhandled exception and no worker exit: no host log entry at
 /// Error or above, no warning carrying an exception unless the scenario
-/// allows it, no unmodelled call, no protocol violation, every background
-/// service still running and the bot still connected (unless stopped).</item>
+/// allows it, no unmodelled call (socket or HTTP), no protocol violation,
+/// every background service still running and the bot still connected
+/// (unless stopped).</item>
 /// <item>Each input gets exactly the declared response. Responses are the
 /// bot's sends, edits and deletes in the input's channel between the input
 /// and the next input there; a reply later edited, or an ephemeral later
 /// updated by clicks, is one response. Recognised commands leave exactly one
-/// completed command_inbox row, ignored ones none. Outputs no input explains
+/// completed command_inbox row, ignored ones none, redelivered ones their one
+/// earlier row and no output. Outputs no input explains
 /// must match <see cref="ScenarioExpectation.OtherOutputs"/>.</item>
 /// <item>Private interactive output is ephemeral. The rule in the code:
 /// ReplyCommandAsync sends a command answer as an ephemeral to the author
@@ -89,7 +91,10 @@ internal static partial class E2EOracles
         var actions = host.Recorder.Since(mark.Sequence);
 
         NoCrashOrUnmodelled(host, mark, expectation, failures);
-        ResponsesPerInput(host, actions, expectation, failures);
+        if (!expectation.ResponsesUnchecked)
+        {
+            ResponsesPerInput(host, actions, expectation, failures);
+        }
         foreach (var output in actions.Where(IsOutput))
         {
             if (output.Kind is SimActionKind.DeleteEphemeral or SimActionKind.DeleteMessage)
@@ -133,6 +138,20 @@ internal static partial class E2EOracles
         }
     }
 
+    /// <summary>
+    /// MonzeInvariants on the host's database once the run is quiescent: no
+    /// violation except the ids in <paramref name="expected"/> (a known defect
+    /// a scenario documents). Leases count as stuck once expired for
+    /// <paramref name="leaseGrace"/> (default 5 s; workers poll every second).
+    /// </summary>
+    public static async Task AssertInvariantsAsync(MonzeE2EHost host, int? aiDailyTokenCap = null, TimeSpan? leaseGrace = null, params string[] expected)
+    {
+        await using var dataSource = Npgsql.NpgsqlDataSource.Create(host.Database.ConnectionString);
+        var violations = await Monze.Testing.Harness.MonzeInvariants.CheckAsync(dataSource, leaseGrace ?? TimeSpan.FromSeconds(5), aiDailyTokenCap);
+        var unexpected = violations.Where(violation => !expected.Contains(violation.Id, StringComparer.Ordinal)).ToList();
+        Assert.True(unexpected.Count == 0, $"Invariant violations: {string.Join(", ", unexpected)}");
+    }
+
     /// <summary>Whether <paramref name="buttonId"/> is a route registered through RegisterPrivateButton.</summary>
     public static bool IsPrivateRoute(string buttonId)
         => Routes.Value.Exact.Contains(buttonId)
@@ -164,6 +183,22 @@ internal static partial class E2EOracles
         {
             if (!pushes.TryGetValue(input.Input.Sequence, out var push) || push.Operation != nameof(SimPushKind.ChannelMessage))
             {
+                continue;
+            }
+
+            if (input.Response == ResponseKind.Duplicate)
+            {
+                await host.Recorder.WaitForQuietAsync(TimeSpan.FromMilliseconds(400), TimeSpan.FromSeconds(5));
+                var rows = await host.ScalarAsync<long>(
+                    "SELECT count(*) FROM command_inbox WHERE clan_id = @clan AND channel_id = @channel AND message_id = @message;",
+                    ("clan", push.ClanId),
+                    ("channel", push.ChannelId),
+                    ("message", push.MessageId));
+                if (rows != 1)
+                {
+                    failures.Add($"Oracle 2: redelivered command #{push.Sequence} has {rows} command_inbox row(s), expected its one earlier row.");
+                }
+
                 continue;
             }
 
@@ -215,6 +250,7 @@ internal static partial class E2EOracles
 
         failures.AddRange(host.Recorder.UnmodelledCalls.Select(static call => $"Oracle 1: unmodelled call {call.Operation}: {call.Detail}"));
         failures.AddRange(host.Recorder.ProtocolViolations.Select(static violation => $"Oracle 1: protocol violation {violation.Operation}: {violation.Detail}"));
+        failures.AddRange((host.Http?.Unmodelled ?? []).Select(static call => $"Oracle 1: unmodelled HTTP call {call}"));
         if (host.IsStopped)
         {
             return;
@@ -228,7 +264,7 @@ internal static partial class E2EOracles
             }
         }
 
-        if (host.Simulator.ConnectedSessions.Count == 0)
+        if (!host.OwnSessions.Any(static session => session.IsConnected))
         {
             failures.Add("Oracle 1: the bot is no longer connected.");
         }
@@ -289,7 +325,7 @@ internal static partial class E2EOracles
         var edits = mine.Where(static output => output.Kind == SimActionKind.UpdateMessage).ToList();
         var updates = mine.Where(static output => output.Kind == SimActionKind.UpdateEphemeral).ToList();
         var deletes = mine.Where(static output => output.Kind is SimActionKind.DeleteEphemeral or SimActionKind.DeleteMessage).ToList();
-        if (kind != ResponseKind.None && mine.Any(static output => output.ResponseCode != 0))
+        if (kind is not (ResponseKind.None or ResponseKind.UpdateRejected) && mine.Any(static output => output.ResponseCode != 0))
         {
             return "the platform rejected part of the response";
         }
@@ -297,7 +333,7 @@ internal static partial class E2EOracles
         bool ToActor(SimAction output) => output.ReceiverIds.Count == 1 && output.ReceiverIds[0] == actor;
         return kind switch
         {
-            ResponseKind.None => mine.Count == 0 ? null : "the bot answered",
+            ResponseKind.None or ResponseKind.Duplicate => mine.Count == 0 ? null : "the bot answered",
             ResponseKind.Ephemeral => ephemerals.Count == 1 && mine.Count == 1 && ToActor(ephemerals[0])
                 ? null
                 : "expected exactly one ephemeral to the actor and nothing else",
@@ -320,6 +356,9 @@ internal static partial class E2EOracles
             ResponseKind.Delete => deletes.Count == 1 && mine.Count == 1 && deletes[0].MessageId == push.MessageId && ToActor(deletes[0])
                 ? null
                 : "expected exactly one delete of the clicked ephemeral",
+            ResponseKind.UpdateRejected => updates.Count == 1 && mine.Count == 1 && updates[0].MessageId == push.MessageId && ToActor(updates[0]) && updates[0].ResponseCode != 0
+                ? null
+                : "expected exactly one refused update of the clicked message to the actor",
             ResponseKind.UpdateAndPublic => sends.Count == 1
                     && sends[0].ReplyToMessageId is null
                     && updates.Count == 1

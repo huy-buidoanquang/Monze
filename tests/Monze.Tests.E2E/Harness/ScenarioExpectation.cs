@@ -20,6 +20,13 @@ internal sealed record ScenarioExpectation
     /// <summary>The actors had no right to change anything: business tables must equal the mark's snapshot.</summary>
     public bool Unauthorized { get; init; }
 
+    /// <summary>
+    /// Random walks: inputs are not declared one by one, so oracle 2 (one
+    /// response per input) is skipped; every other oracle still applies and
+    /// the walk checks its own exactly-once properties and the invariants.
+    /// </summary>
+    public bool ResponsesUnchecked { get; init; }
+
     public static ScenarioExpectation Of(params (Monze.Simulator.SimPush Input, ResponseKind Response)[] inputs)
         => new() { Inputs = inputs.Select(static input => new InputExpectation(input.Input, input.Response)).ToList() };
 }

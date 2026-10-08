@@ -12,14 +12,20 @@ namespace Monze.Tests.E2E.Harness;
 
 /// <summary>
 /// A <see cref="SimulatedMonzeHost"/> on the campaign PostgreSQL
-/// (MONZE_TEST_POSTGRES) with xUnit assertions for a clean run.
+/// (MONZE_TEST_POSTGRES) with xUnit assertions for a clean run. A host can
+/// share the database, simulator and data directory of another one (restart,
+/// second instance) and carry the <see cref="SimHttpHost"/> it talks to.
 /// </summary>
 internal sealed class MonzeE2EHost : IAsyncDisposable
 {
     public static readonly TimeSpan StartTimeout = TimeSpan.FromSeconds(45);
     private readonly SimulatedMonzeHost _host;
 
-    private MonzeE2EHost(SimulatedMonzeHost host) => _host = host;
+    private MonzeE2EHost(SimulatedMonzeHost host, SimHttpHost? http)
+    {
+        _host = host;
+        Http = http;
+    }
 
     public MezonSimulator Simulator => _host.Simulator;
 
@@ -35,14 +41,23 @@ internal sealed class MonzeE2EHost : IAsyncDisposable
 
     public IServiceProvider Services => _host.Services;
 
+    /// <summary>The HTTP fake (Agent SSE, transcript, AI) this host was configured with, if any.</summary>
+    public SimHttpHost? Http { get; }
+
+    public DirectoryInfo DataDirectory => _host.DataDirectory;
+
+    /// <summary>The sockets this host's bot opened (other hosts may share the simulator).</summary>
+    public IReadOnlyList<SimTransporter> OwnSessions => _host.OwnSessions;
+
     /// <summary>
-    /// Creates and migrates a database, starts Monze on the simulator and
+    /// Creates and migrates a database (or reuses <paramref name="database"/>),
+    /// starts Monze on the simulator (or on <paramref name="simulator"/>) and
     /// waits until it joined the clans. <paramref name="configuration"/>
     /// overrides the in-memory configuration (for example secret canaries or
     /// rate-limit buckets), <paramref name="services"/> replaces registrations
     /// after production composition, and <paramref name="seed"/> writes to the
-    /// migrated database before the host starts; <paramref name="timings"/>
-    /// adjusts the short E2E worker timings.
+    /// database before the host starts; <paramref name="timings"/> adjusts
+    /// the short E2E worker timings.
     /// </summary>
     public static async Task<MonzeE2EHost> StartAsync(
         SimWorld world,
@@ -52,7 +67,11 @@ internal sealed class MonzeE2EHost : IAsyncDisposable
         IReadOnlyDictionary<string, string?>? configuration = null,
         Action<IServiceCollection>? services = null,
         Func<CampaignDatabase, Task>? seed = null,
-        Func<MonzeWorkerTimings, MonzeWorkerTimings>? timings = null)
+        Func<MonzeWorkerTimings, MonzeWorkerTimings>? timings = null,
+        CampaignDatabase? database = null,
+        MezonSimulator? simulator = null,
+        DirectoryInfo? dataDirectory = null,
+        SimHttpHost? http = null)
         => new(await SimulatedMonzeHost.StartAsync(
             world,
             TestPostgres.ConnectionString,
@@ -65,8 +84,11 @@ internal sealed class MonzeE2EHost : IAsyncDisposable
                 Services = services,
                 SeedAsync = seed,
                 Timings = timings,
-                StartTimeout = StartTimeout
-            }));
+                StartTimeout = StartTimeout,
+                Database = database,
+                SharedSimulator = simulator,
+                DataDirectory = dataDirectory
+            }), http);
 
     public Task<string> WaitForCommandStatusAsync(long clanId, long channelId, long messageId, TimeSpan timeout)
         => _host.WaitForCommandStatusAsync(clanId, channelId, messageId, timeout);
@@ -80,7 +102,8 @@ internal sealed class MonzeE2EHost : IAsyncDisposable
     /// <summary>No unmodelled calls, no protocol violations, no error or exception in the host log.</summary>
     public void AssertClean(bool allowWarningsWithExceptions = false)
     {
-        var problems = _host.Problems(allowWarningsWithExceptions);
+        var problems = _host.Problems(allowWarningsWithExceptions).ToList();
+        problems.AddRange((Http?.Unmodelled ?? []).Select(static call => $"unmodelled HTTP: {call}"));
         Assert.True(problems.Count == 0, $"Run was not clean:{Environment.NewLine}{string.Join(Environment.NewLine, problems)}{Environment.NewLine}{Recorder.Describe()}");
     }
 

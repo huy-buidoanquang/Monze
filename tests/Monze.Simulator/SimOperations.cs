@@ -42,7 +42,8 @@ public static class SimOperations
 
     /// <summary>
     /// Agent SSE (src/Mezon.Net.Sdk/Agent/AgentSseManager.cs) opens its own
-    /// HttpClient, so it bypasses both SDK seams and cannot be simulated.
+    /// HttpClient, so it bypasses both SDK seams; <see cref="SimHttpHost"/>
+    /// fakes it over loopback HTTP instead.
     /// </summary>
     public const string AgentSse = "AgentSse";
 
@@ -81,6 +82,6 @@ public static class SimOperations
     /// <summary>Operations that are deliberately not modelled, with the reason.</summary>
     public static IReadOnlyDictionary<string, string> NotModelled { get; } = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        [AgentSse] = "Agent SSE uses its own HttpClient (no SDK seam); keep Mezon:AgentBaseUrl empty."
+        [AgentSse] = "Agent SSE uses its own HttpClient (no SDK seam); point Mezon:AgentBaseUrl at a SimHttpHost or keep it empty."
     };
 }
