@@ -15,8 +15,8 @@ namespace Monze.Tests.Property.Ui;
 /// dictionaries). Every resolvable token is replaced (regression D6), an
 /// unresolvable one stays verbatim, each mention and hashtag span covers
 /// exactly its replacement, and no raw id appears in the text.
-/// Known gap CAND-13: a stray "{" before a token makes the renderer read
-/// "{ {user}" as one unknown token, so the token is not replaced.
+/// Regression for CAND-13: a stray "{" before a token used to make the
+/// renderer read "{ {user}" as one unknown token, so it was not replaced.
 /// </summary>
 public sealed partial class G06WelcomeRendererProperties
 {
@@ -87,11 +87,6 @@ public sealed partial class G06WelcomeRendererProperties
                     return PropertyResult.Fail(input, tags, "rendered text contains a raw id");
                 }
 
-                if (stray)
-                {
-                    return same ? PropertyResult.Pass(input, tags, "CAND-13") : PropertyResult.Known("CAND-13", input, tags, note);
-                }
-
                 return PropertyResult.Check(same, input, tags, () => note);
             },
             iterations: 100_000,
@@ -99,8 +94,7 @@ public sealed partial class G06WelcomeRendererProperties
                 .Dimension("first", Pieces)
                 .Dimension("embed", "yes", "no")
                 .Dimension("stray", "yes", "no")
-                .Infeasible("first", "stray-brace", "stray", "no"),
-            knownDefects: ["CAND-13"]);
+                .Infeasible("first", "stray-brace", "stray", "no"));
     }
 
     private static Rendered Reference(string template)

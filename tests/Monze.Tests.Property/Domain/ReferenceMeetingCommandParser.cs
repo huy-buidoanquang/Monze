@@ -9,7 +9,7 @@ namespace Monze.Tests.Property.Domain;
 /// rather than from MeetingCommandParser:
 ///   now
 ///   cancel &lt;id&gt;                         id: ASCII digits, value 1..long.MaxValue
-///   &lt;name&gt; dd/MM/yyyy HH:mm [kind]
+///   &lt;name&gt; dd/MM/yyyy HH:mm [kind]          H:mm too, as in the daily form
 ///   &lt;name&gt; &lt;kind&gt; dd/MM/yyyy HH:mm         one frequency at most
 ///   &lt;kind&gt; &lt;rest&gt;                        legacy, validated later by the calculator
 /// The name is 1..120 UTF-16 characters; keywords are ASCII, case-insensitive.
@@ -58,12 +58,15 @@ internal static class ReferenceMeetingCommandParser
             && day <= DateTime.DaysInMonth(year, month);
 
     public static bool IsTime(string value)
-        => value.Length == 5
-            && value[2] == ':'
-            && Digits(value, 0, 2, out var hour)
-            && Digits(value, 3, 2, out var minute)
+    {
+        var colon = value.Length - 3;
+        return colon is 1 or 2
+            && value[colon] == ':'
+            && Digits(value, 0, colon, out var hour)
+            && Digits(value, colon + 1, 2, out var minute)
             && hour <= 23
             && minute <= 59;
+    }
 
     public static MeetingScheduleKind? Kind(string token)
         => Is(token, "once") ? MeetingScheduleKind.Once

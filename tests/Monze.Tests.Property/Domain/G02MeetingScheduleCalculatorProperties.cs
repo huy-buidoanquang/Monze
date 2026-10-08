@@ -12,14 +12,11 @@ namespace Monze.Tests.Property.Domain;
 /// scans every candidate day (daily: yesterday..+8 days, weekly: +14 days) and
 /// takes the earliest existing local time after now. "now" and the local time
 /// are drawn around real offset transitions of 10 time zones.
-/// Known gap CAND-09: daily inspects only today and tomorrow, weekly only the
-/// next target day and the week after; when no existing local time after now
-/// falls in that window (DST gap, skipped or repeated calendar day) they give
-/// up instead of moving on. Production schedules use Asia/Ho_Chi_Minh, which
+/// Regression for CAND-09: daily used to inspect only today and tomorrow and
+/// weekly only the next target day and the week after, giving up when no
+/// existing local time after now fell in that window (DST gap, skipped or
+/// repeated calendar day). Production schedules use Asia/Ho_Chi_Minh, which
 /// has no transitions.
-/// ENV-01: Windows time zone data for Pacific/Apia around 2011-12-30 is not
-/// self-consistent (GetUtcOffset and ConvertTime disagree); the oracle uses the
-/// same TimeZoneInfo, so those inputs land in the CAND-09 window class.
 /// </summary>
 public sealed class G02MeetingScheduleCalculatorProperties
 {
@@ -60,7 +57,6 @@ public sealed class G02MeetingScheduleCalculatorProperties
                     ledger.Infeasible("zone", zone, "now", "transition").Infeasible("zone", zone, "time", "transition-local");
                 }
             },
-            knownDefects: ["CAND-09"],
             print: static item => item.Describe());
     }
 
@@ -82,28 +78,17 @@ public sealed class G02MeetingScheduleCalculatorProperties
             _ => MeetingScheduleKind.Weekly
         };
         var ok = MeetingScheduleCalculator.TryGetNext(kind, item.WhenText, item.Zone, item.Now, out var next, out _);
-        var expected = Oracle(item, zone, out var gapInImplementationWindow);
+        var expected = Oracle(item, zone);
         var same = ok == expected.HasValue && (!ok || next == expected!.Value);
         var note = $"expected {(expected is { } value ? value.ToString("u", CultureInfo.InvariantCulture) : "reject")}, got {(ok ? next.ToString("u", CultureInfo.InvariantCulture) : "reject")}";
-        if (gapInImplementationWindow)
-        {
-            return same
-                ? PropertyResult.Pass(item.Describe(), tags, "CAND-09")
-                : !ok ? PropertyResult.Known("CAND-09", item.Describe(), tags, note) : PropertyResult.Fail(item.Describe(), tags, note);
-        }
-
         return PropertyResult.Check(same, item.Describe(), tags, () => note);
     }
 
     /// <summary>
-    /// The earliest valid instant after now, or null. Also reports whether the
-    /// days the implementation inspects (daily: today and tomorrow, weekly: the
-    /// next target day and the week after) hold no existing local time after
-    /// now, or hold a local time that does not exist.
+    /// The earliest valid instant after now, or null.
     /// </summary>
-    private static DateTimeOffset? Oracle(ScheduleCase item, TimeZoneInfo zone, out bool gapInImplementationWindow)
+    private static DateTimeOffset? Oracle(ScheduleCase item, TimeZoneInfo zone)
     {
-        gapInImplementationWindow = false;
         var localToday = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(item.Now, zone).DateTime);
         switch (item.Kind)
         {
@@ -129,8 +114,6 @@ public sealed class G02MeetingScheduleCalculatorProperties
                     return null;
                 }
 
-                var window = new[] { At(localToday, time), At(localToday.AddDays(1), time) };
-                gapInImplementationWindow = window.Any(zone.IsInvalidTime) || Earliest(zone, item.Now, window) is null;
 
                 return Earliest(zone, item.Now, Enumerable.Range(-1, 10).Select(day => At(localToday.AddDays(day), time)));
             }
@@ -153,9 +136,6 @@ public sealed class G02MeetingScheduleCalculatorProperties
                     }
                 }
 
-                var first = localToday.AddDays(((int)target - (int)localToday.DayOfWeek + 7) % 7);
-                var weeks = new[] { At(first, time), At(first.AddDays(7), time) };
-                gapInImplementationWindow = weeks.Any(zone.IsInvalidTime) || Earliest(zone, item.Now, weeks) is null;
                 return Earliest(zone, item.Now, Enumerable.Range(0, 15)
                     .Select(day => localToday.AddDays(day))
                     .Where(date => date.DayOfWeek == target)

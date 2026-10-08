@@ -12,8 +12,8 @@ namespace Monze.Tests.Property.Domain;
 /// A local time that does not exist is rejected; an ambiguous one maps to the
 /// earlier instant; every accepted instant converts back to the same wall
 /// time; Describe prints dd/MM/yyyy HH:mm in the Gregorian calendar.
-/// Known gap CAND-10: Describe formats with the host culture, so tr-TR prints
-/// "08.10.2026" and ar-SA prints a Hijri date.
+/// Regression for CAND-10: Describe used the host culture, so tr-TR printed
+/// "08.10.2026" and ar-SA a Hijri date.
 /// ENV-01: where the platform's own conversions disagree (Windows data for
 /// Pacific/Apia around 2011-12-30), the round trip cannot hold for any code;
 /// those inputs are recorded as "skip" with tag platform=inconsistent.
@@ -78,15 +78,7 @@ public sealed class G03LocalScheduleProperties
 
                 var description = Cultures.Run(item.Culture, () => LocalSchedule.Describe(utc, item.Zone));
                 var invariant = $"{item.Local.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture)} ({item.Zone})";
-                var culturallyAffected = item.Culture is "tr-TR" or "ar-SA";
-                if (description == invariant)
-                {
-                    return PropertyResult.Pass(input, tags, culturallyAffected ? "CAND-10" : null);
-                }
-
-                return culturallyAffected
-                    ? PropertyResult.Known("CAND-10", input, tags, $"Describe printed '{description}'")
-                    : PropertyResult.Fail(input, tags, $"Describe printed '{description}', expected '{invariant}'");
+                return PropertyResult.Check(description == invariant, input, tags, () => $"Describe printed '{description}', expected '{invariant}'");
             },
             iterations: 80_000,
             declare: static ledger =>
@@ -97,7 +89,6 @@ public sealed class G03LocalScheduleProperties
                     ledger.Infeasible("zone", zone, "mode", "transition-local");
                 }
             },
-            knownDefects: ["CAND-10"],
             print: static item => $"{item.Local:O} {item.Zone} {item.Culture}");
     }
 

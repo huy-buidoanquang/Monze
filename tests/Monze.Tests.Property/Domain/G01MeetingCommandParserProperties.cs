@@ -9,10 +9,9 @@ namespace Monze.Tests.Property.Domain;
 /// <summary>
 /// G01: MeetingCommandParser against the documented grammar
 /// (ReferenceMeetingCommandParser), over 18 command shapes, keyword casing
-/// and host culture.
-/// Known gaps: CAND-03 accepts a signed id ("cancel +5"), CAND-08 accepts two
-/// frequencies and keeps the last one. G01b: CAND-02, the named form rejects
-/// H:mm times that the daily form accepts.
+/// and host culture. Regressions: CAND-03 (a signed id, "cancel +5", was
+/// accepted), CAND-08 (two frequencies were accepted, the last one kept) and,
+/// in G01b, CAND-02 (the named form rejected H:mm times the daily form takes).
 /// </summary>
 public sealed class G01MeetingCommandParserProperties
 {
@@ -47,7 +46,7 @@ public sealed class G01MeetingCommandParserProperties
         select new Token($"{hour:00}:{minute:00}", false);
 
     private static readonly Gen<Token> BadTime = Gen.OneOfConst(
-        "24:00", "9:00", "12:60", "1200", "12:5", "٠٩:٠٠", "25:61", "-1:00", "12:00:00").Select(static text => new Token(text, false));
+        "24:00", "9:5", "12:60", "1200", "12:5", "٠٩:٠٠", "25:61", "-1:00", "12:00:00").Select(static text => new Token(text, false));
 
     private static readonly Gen<Token> KindWord = Gen.OneOfConst("once", "daily", "weekly").Select(static text => new Token(text, true));
 
@@ -111,19 +110,13 @@ public sealed class G01MeetingCommandParserProperties
                 var actual = Cultures.Run(command.Culture, () => MeetingCommandParser.TryParse(command.Tokens, out var request) ? request : null);
                 var same = Equals(expected, actual);
                 var note = $"expected {Show(expected)}, got {Show(actual)}";
-                return command.Shape switch
-                {
-                    "cancel-signed" => same ? PropertyResult.Pass(input, tags, "CAND-03") : PropertyResult.Known("CAND-03", input, tags, note),
-                    "named-two-kinds" => same ? PropertyResult.Pass(input, tags, "CAND-08") : PropertyResult.Known("CAND-08", input, tags, note),
-                    _ => PropertyResult.Check(same, input, tags, () => note)
-                };
+                return PropertyResult.Check(same, input, tags, () => note);
             },
             iterations: 150_000,
             declare: static ledger => ledger
                 .Dimension("shape", Shapes)
                 .Dimension("case", Casings)
                 .Dimension("culture", Cultures.Names),
-            knownDefects: ["CAND-03", "CAND-08"],
             print: static command => Describe(command.Tokens));
     }
 
@@ -147,13 +140,10 @@ public sealed class G01MeetingCommandParserProperties
                 var daily = Cultures.Run(culture, () => MeetingScheduleCalculator.TryGetNext(
                     MeetingScheduleKind.Daily, time, "Asia/Ho_Chi_Minh", now, out _, out _));
                 var note = $"named form {(named ? "accepts" : "rejects")} '{time}', daily form {(daily ? "accepts" : "rejects")} it";
-                return form == "H:mm"
-                    ? named == daily ? PropertyResult.Pass(time, tags, "CAND-02") : PropertyResult.Known("CAND-02", time, tags, note)
-                    : PropertyResult.Check(named == daily, time, tags, () => note);
+                return PropertyResult.Check(named == daily, time, tags, () => note);
             },
             iterations: 20_000,
-            declare: static ledger => ledger.Dimension("form", "HH:mm", "H:mm", "invalid").Dimension("culture", Cultures.Names),
-            knownDefects: ["CAND-02"]);
+            declare: static ledger => ledger.Dimension("form", "HH:mm", "H:mm", "invalid").Dimension("culture", Cultures.Names));
     }
 
     private static Token Keyword(string text) => new(text, true);

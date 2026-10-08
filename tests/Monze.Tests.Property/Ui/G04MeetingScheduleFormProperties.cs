@@ -16,9 +16,9 @@ namespace Monze.Tests.Property.Ui;
 /// the trimmed name (1–120 characters), the payload's calendar date as
 /// dd/MM/yyyy, an HH:mm or H:mm time and the frequency; DescribeInput must
 /// never echo a field value (privacy).
-/// Known gap CAND-12: an ISO timestamp with an offset is converted to the
-/// server's local time zone before the date is taken, so the calendar date
-/// can move to the adjacent day.
+/// Regression for CAND-12: an ISO timestamp with an offset used to be
+/// converted to the server's local time zone before the date was taken, so
+/// the calendar date could move to the adjacent day.
 /// </summary>
 public sealed class G04MeetingScheduleFormProperties
 {
@@ -106,14 +106,6 @@ public sealed class G04MeetingScheduleFormProperties
                 var sameFields = name == expectedName && time == expectedTime && kind == expectedKind;
                 var sameDate = date == expectedDate;
                 var note = $"expected ok={expectedOk} date={expectedDate}, got ok={ok} date={date} name='{name}' time='{time}' kind={kind}";
-                if (item.DateShape == "iso-offset" && rawDate is not null && item.Date.Encoding != "missing")
-                {
-                    var consistent = sameFields && sameDate && ok == expectedOk;
-                    return consistent
-                        ? PropertyResult.Pass(input, tags, "CAND-12")
-                        : sameFields && !sameDate ? PropertyResult.Known("CAND-12", input, tags, note) : PropertyResult.Fail(input, tags, note);
-                }
-
                 return PropertyResult.Check(sameFields && sameDate && ok == expectedOk, input, tags, () => note);
             },
             iterations: 60_000,
@@ -121,8 +113,7 @@ public sealed class G04MeetingScheduleFormProperties
                 .Dimension("name", Encodings)
                 .Dimension("date", Encodings)
                 .Dimension("time", Encodings)
-                .Dimension("date-shape", "local", "iso", "iso-time", "iso-offset", "iso-millis", "invalid"),
-            knownDefects: ["CAND-12"]);
+                .Dimension("date-shape", "local", "iso", "iso-time", "iso-offset", "iso-millis", "invalid"));
     }
 
     /// <summary>The calendar date written in the payload, as dd/MM/yyyy; other text is kept trimmed.</summary>

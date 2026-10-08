@@ -24,8 +24,9 @@ public static class MeetingCommandParser
 
         if (head.Equals("cancel", StringComparison.OrdinalIgnoreCase))
         {
+            // ASCII digits only: no sign, no spaces, no culture-specific digits (CAND-03).
             if (args.Count == 2
-                && long.TryParse(args[1], out var scheduleId)
+                && long.TryParse(args[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var scheduleId)
                 && scheduleId > 0)
             {
                 request = new MeetingRequest(MeetingScheduleKind.Once, null, null, scheduleId);
@@ -81,9 +82,11 @@ public static class MeetingCommandParser
         }
 
         var nameEnd = dateIndex;
+        var kindBeforeDate = false;
         if (dateIndex > 1 && ParseKind(args[dateIndex - 1]) is { } explicitKind)
         {
             kind = explicitKind;
+            kindBeforeDate = true;
             nameEnd--;
         }
 
@@ -97,8 +100,10 @@ public static class MeetingCommandParser
         var suffixIndex = dateIndex + 2;
         if (suffixIndex < args.Count)
         {
+            // One frequency at most: before the date or after the time (CAND-08).
             if (ParseKind(args[suffixIndex]) is { } suffixKind
-                && suffixIndex + 1 == args.Count)
+                && suffixIndex + 1 == args.Count
+                && !kindBeforeDate)
             {
                 kind = suffixKind;
             }
@@ -142,10 +147,11 @@ public static class MeetingCommandParser
             System.Globalization.DateTimeStyles.None,
             out _);
 
+    // H:mm too, as the daily form accepts it (CAND-02).
     private static bool IsTime(string value)
         => TimeOnly.TryParseExact(
             value,
-            "HH:mm",
+            ["HH:mm", "H:mm"],
             System.Globalization.CultureInfo.InvariantCulture,
             System.Globalization.DateTimeStyles.None,
             out _);
