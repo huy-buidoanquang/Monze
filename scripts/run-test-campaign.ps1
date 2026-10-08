@@ -49,9 +49,9 @@ Set-Location $repo
 $profileName = if ($Full -and $Soak) { 'full-soak' } elseif ($Full) { 'full' } elseif ($Deep) { 'deep' } elseif ($Soak) { 'soak' } else { 'quick' }
 $allTiers = @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'component', 'load', 'k6', 'capacity', 'chaos', 'soak', 'live')
 # Tiers whose runners exist in this revision. Later commits add to this list.
-$implemented = @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro')
+$implemented = @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'component')
 $profileTiers = switch ($profileName) {
-    'quick' { @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'load', 'capacity', 'chaos') }
+    'quick' { @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'component', 'load', 'capacity', 'chaos') }
     'deep' { @('build', 'inventory', 'unit', 'property', 'integration', 'e2e') }
     'soak' { @('build', 'soak') }
     default { @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'component', 'load', 'k6', 'capacity', 'chaos') + $(if ($Soak) { @('soak') } else { @() }) }
@@ -160,6 +160,32 @@ function Invoke-TestTier {
     $status = if ($counts.Failed -gt 0 -or $run.ExitCode -ne 0) { 'FAIL' } else { 'PASS' }
     if ($Strict -and $counts.Skipped -gt 0) { $status = 'FAIL'; $note += ' (tier strict không được có test skip)' }
     if ($counts.Total -eq 0) { $status = 'FAIL'; $note = 'Không có test nào chạy' }
+    return @{ Status = $status; Note = $note; Exit = $run.ExitCode; Command = $run.Command; Seconds = $watch.Elapsed.TotalSeconds }
+}
+
+function Invoke-ComponentTier {
+    param([int]$TimeoutMinutes)
+    # Component scenarios run one after another on an otherwise idle machine
+    # and write one monze.artifact.v1 file each to raw/component/.
+    $arguments = @((Join-Path $repo 'tests/Monze.Campaign/bin/Release/net10.0/Monze.Campaign.dll'), 'component', '--artifacts', $raw)
+    if ($profileName -ne 'quick') { $arguments += '--full' }
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    $run = Invoke-Logged -Name 'component' -File 'dotnet' -Arguments $arguments -TimeoutMinutes $TimeoutMinutes
+    $watch.Stop()
+    $results = @(Get-ChildItem -Path (Join-Path $raw 'component') -Filter '*.json' -ErrorAction SilentlyContinue |
+        ForEach-Object { Get-Content -Raw $_.FullName | ConvertFrom-Json })
+    if ($run.TimedOut) { return @{ Status = 'TIMEOUT'; Note = "Quá $TimeoutMinutes phút"; Exit = $null; Command = $run.Command; Seconds = $watch.Elapsed.TotalSeconds } }
+    if ($results.Count -eq 0) { return @{ Status = 'ERROR'; Note = 'Không có artifact component (xem raw/logs/component*.log)'; Exit = $run.ExitCode; Command = $run.Command; Seconds = $watch.Elapsed.TotalSeconds } }
+    # A KNOWN_GAP reproduces a registered defect, like an xfail; a gap that no
+    # longer reproduces fails the tier until its expectation is updated.
+    $failed = @($results | Where-Object { $_.verdict -notin 'PASS', 'KNOWN_GAP', 'BLOCKED' })
+    $known = @($results | Where-Object { $_.verdict -eq 'KNOWN_GAP' })
+    $blocked = @($results | Where-Object { $_.verdict -eq 'BLOCKED' })
+    $status = if ($failed.Count -gt 0) { 'FAIL' } elseif ($blocked.Count -gt 0) { 'BLOCKED' } else { 'PASS' }
+    $note = "$(@($results | Where-Object { $_.verdict -eq 'PASS' }).Count)/$($results.Count) PASS, $($known.Count) KNOWN_GAP"
+    if ($known.Count -gt 0) { $note += ' (' + (@($known | ForEach-Object { "$($_.id): $(@($_.defectIds) -join '/')" }) -join ', ') + ')' }
+    if ($failed.Count -gt 0) { $note += ', FAIL: ' + (@($failed | ForEach-Object { "$($_.id)=$($_.verdict)" }) -join ', ') }
+    if ($blocked.Count -gt 0) { $note += ', BLOCKED: ' + (@($blocked | ForEach-Object { $_.id }) -join ', ') }
     return @{ Status = $status; Note = $note; Exit = $run.ExitCode; Command = $run.Command; Seconds = $watch.Elapsed.TotalSeconds }
 }
 
@@ -282,7 +308,7 @@ try {
     Add-Tier 'preflight' 'PASS' $watch.Elapsed.TotalSeconds 0 $null (($preflightNotes + @("branch $branch")) -join '; ')
 
     # ------------------------------------------------------------ containers (start while building)
-    $needsDb = ($requested -contains 'integration') -or ($requested -contains 'e2e')
+    $needsDb = @($requested | Where-Object { $_ -in 'integration', 'e2e', 'component' }).Count -gt 0
     if ($needsDb) {
         $null = Start-CampaignPostgres 'pg17' 'postgres:17-alpine' 55432 $secrets.postgres 'monze_t_integration'
         $null = Start-CampaignPostgres 'pg16' 'postgres:16' 55433 $secrets.postgres 'monze_t_integration'
@@ -356,6 +382,17 @@ try {
                 }
                 finally {
                     Remove-Item Env:MONZE_TEST_POSTGRES -ErrorAction SilentlyContinue
+                }
+            }
+            'component' {
+                $env:MONZE_TEST_POSTGRES = "Host=127.0.0.1;Port=55432;Database=monze_t_integration;Username=monze;Password=$($secrets.postgres)"
+                $env:MONZE_TEST_POSTGRES_ALT = "Host=127.0.0.1;Port=55433;Database=monze_t_integration;Username=monze;Password=$($secrets.postgres)"
+                $env:MONZE_REDIS_CONNECTION = "127.0.0.1:56379,password=$($secrets.redis)"
+                try {
+                    $result = Invoke-ComponentTier -TimeoutMinutes $(if ($profileName -eq 'quick') { 10 } else { 45 })
+                }
+                finally {
+                    Remove-Item Env:MONZE_TEST_POSTGRES, Env:MONZE_TEST_POSTGRES_ALT, Env:MONZE_REDIS_CONNECTION -ErrorAction SilentlyContinue
                 }
             }
             'micro' {

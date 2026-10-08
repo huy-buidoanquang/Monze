@@ -11,4 +11,5 @@
   <Project Path="tests/Monze.TestReport/Monze.TestReport.csproj" />
   <Project Path="tests/Monze.Simulator/Monze.Simulator.csproj" />
   <Project Path="tests/Monze.Tests.E2E/Monze.Tests.E2E.csproj" />
+  <Project Path="tests/Monze.Campaign/Monze.Campaign.csproj" />
 </Solution>
