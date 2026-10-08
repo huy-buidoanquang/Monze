@@ -45,6 +45,7 @@ public sealed partial class MonzeBot : BackgroundService
     private readonly TimeProvider _time;
     private readonly MonzeWorkerTimings _timings;
     private readonly MonzeClientCustomization? _clientCustomization;
+    private readonly int _maxCommandsInFlight;
     private readonly IEventIngressQueue<ChannelMessageEventData> _messageIngress;
     private readonly Channel<MessageGapIngressItem> _messageGapIngress;
     private readonly Channel<MeetingIngressItem> _meetingIngress;
@@ -68,6 +69,7 @@ public sealed partial class MonzeBot : BackgroundService
     private long _agentPendingWriters;
     private long _welcomePendingWriters;
     private long _outboxInFlight;
+    private int _commandsInFlight;
     private SqliteMessageStore? _messages;
 
     public MonzeBot(
@@ -124,6 +126,7 @@ public sealed partial class MonzeBot : BackgroundService
         _timings = timings;
         _logger = logger;
         _clientCustomization = clientCustomization;
+        _maxCommandsInFlight = Math.Clamp(configuration.GetValue("Monze:Commands:MaxInFlight", 64), 1, 4096);
         var weakSelf = new WeakReference<MonzeBot>(this);
         MonzeMetrics.RegisterRuntimeState(
             () => weakSelf.TryGetTarget(out var bot)
@@ -246,7 +249,7 @@ public sealed partial class MonzeBot : BackgroundService
                 await client.ConnectAgentSseAsync(runtimeToken);
             }
 
-            outboxWorker = RunOutboxWorkerAsync(client, runtimeToken);
+            outboxWorker = RunOutboxWorkerAsync(client, CreateOutboxPacer(_configuration, options, _time), runtimeToken);
             roleWorker = ConsumeAutomaticRoleRulesAsync(runtimeToken);
 
             while (!runtimeToken.IsCancellationRequested)
@@ -308,6 +311,10 @@ public sealed partial class MonzeBot : BackgroundService
         string token,
         MonzeClientCustomization? customization)
     {
+        var perMinute = Math.Clamp(
+            configuration.GetValue("Mezon:RateLimit:RequestsPerMinute", 500),
+            1,
+            10000);
         var options = new MezonClientOptions(
             botId,
             token,
@@ -317,14 +324,16 @@ public sealed partial class MonzeBot : BackgroundService
         {
             TransportType = ResolveTransportType(configuration["Mezon:Transport"]),
             AgentEventUrl = configuration["Mezon:AgentBaseUrl"] ?? string.Empty,
+
+            // Paced evenly by default: a sixtieth of the minute budget per
+            // second never spends the minute window early. With the SDK's
+            // 60/s, 500 requests went out in about eight seconds and nothing
+            // was sent for the rest of the minute.
             MaxTransportRequestsPerSecond = Math.Clamp(
-                configuration.GetValue("Mezon:RateLimit:RequestsPerSecond", 60),
+                configuration.GetValue("Mezon:RateLimit:RequestsPerSecond", Math.Max(1, perMinute / 60)),
                 1,
                 1000),
-            MaxTransportRequestsPerMinute = Math.Clamp(
-                configuration.GetValue("Mezon:RateLimit:RequestsPerMinute", 500),
-                1,
-                10000),
+            MaxTransportRequestsPerMinute = perMinute,
             MaxConnectRequestsPerSecond = Math.Clamp(
                 configuration.GetValue("Mezon:RateLimit:ConnectRequestsPerSecond", 2),
                 1,
@@ -334,6 +343,19 @@ public sealed partial class MonzeBot : BackgroundService
         };
         customization?.Configure(options);
         return options;
+    }
+
+    /// <summary>
+    /// The pace of bulk outbox delivery: at most
+    /// Monze:Outbox:TransportSharePercent (default 50) of the transport's
+    /// minute budget, so command replies, buttons and welcome messages keep
+    /// the rest while a backlog drains. It banks about two seconds of sends.
+    /// </summary>
+    internal static UpstreamPacer CreateOutboxPacer(IConfiguration configuration, MezonClientOptions options, TimeProvider time)
+    {
+        var share = Math.Clamp(configuration.GetValue("Monze:Outbox:TransportSharePercent", 50), 1, 100);
+        var perMinute = options.MaxTransportRequestsPerMinute * share / 100.0;
+        return new UpstreamPacer(perMinute, Math.Clamp((int)(perMinute / 30), 1, 64), time);
     }
 
     private static TransportType ResolveTransportType(string? configured)

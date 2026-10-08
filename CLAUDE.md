@@ -84,7 +84,9 @@ The solution `Monze.slnx` targets net10.0 throughout.
 ### Configuration precedence
 - `Program.cs` adds `appsettings.json`, `appsettings.{env}.local.json` and `appsettings.secrets.json` after the host defaults. JSON values therefore override environment variables such as `Monze__Postgres`.
 - The default environment is Production. `appsettings.Development.local.json` loads only with `DOTNET_ENVIRONMENT=Development`.
-- Transport rate limits are read from `Mezon:RateLimit:*`. `appsettings.example.json` puts them under `Monze:RateLimit`, where they are ignored; the defaults happen to match.
+- Transport rate limits are read from `Mezon:RateLimit:*`: 500 requests a minute by default and, unless set, a sixtieth of that per second, so the budget is paced evenly. `appsettings.example.json` puts them under `Monze:RateLimit`, where they are ignored; the defaults happen to match.
+- The realtime server (`mezon-proto-server`, `rate_limit`) limits message sends per connection: built-in default 60/s and 200/min, dev config 100/s and 500/min. Beyond it a send gets error 429.
+- Bulk outbox delivery uses at most `Monze:Outbox:TransportSharePercent` (default 50) of the transport budget. Commands beyond `Monze:Commands:MaxInFlight` (default 64) in flight are dropped unanswered.
 
 ### Code organization
 - Prefer one primary public type per source file.

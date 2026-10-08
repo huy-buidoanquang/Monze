@@ -132,6 +132,36 @@ public sealed class OutboxReconciliationRepositoryTests
         await db.AssertTransitionsAsync();
     }
 
+    /// <summary>
+    /// A send waiting for upstream capacity keeps its row: the worker renews
+    /// the leases of its deliveries, and only the current lease of a row that
+    /// is still 'sending' is extended.
+    /// </summary>
+    [DbFact]
+    [Req("REQ-OUT-001")]
+    [Covers("port:IOutboxRepository.RenewOutboxLeasesAsync")]
+    public async Task Only_the_current_lease_of_a_sending_row_is_renewed()
+    {
+        await using var db = await AuditedDatabase.CreateAsync("reconcile_renew");
+        var repository = new PostgresOutboxRepository(db.DataSource);
+        var waiting = await InsertAsync(db, "renew-waiting");
+        var other = await InsertAsync(db, "renew-other");
+        var claimed = (await repository.ClaimDueOutboxAsync(CancellationToken.None, Clan)).ToDictionary(static item => item.Id);
+        await db.ExecuteAsync("UPDATE outbox_delivery SET locked_until = now() + interval '1 second';");
+        await repository.CompleteOutboxAsync(other, claimed[other].LeaseToken, 1_900_000_000_000_000_011, failed: false, CancellationToken.None);
+
+        await repository.RenewOutboxLeasesAsync(new Dictionary<long, string> { [waiting] = claimed[waiting].LeaseToken, [other] = claimed[other].LeaseToken }, CancellationToken.None);
+        await repository.RenewOutboxLeasesAsync(new Dictionary<long, string>(), CancellationToken.None);
+
+        Assert.Equal(1, await db.CountAsync("SELECT count(*) FROM outbox_delivery WHERE id = @id AND status = 'sending' AND locked_until > now() + interval '50 seconds';", ("id", waiting)));
+        Assert.Equal(1, await db.CountAsync("SELECT count(*) FROM outbox_delivery WHERE id = @id AND status = 'sent' AND locked_until IS NULL;", ("id", other)));
+
+        await db.ExecuteAsync("UPDATE outbox_delivery SET locked_until = now() + interval '1 second' WHERE id = @id;", ("id", waiting));
+        await repository.RenewOutboxLeasesAsync(new Dictionary<long, string> { [waiting] = "stale" }, CancellationToken.None);
+        Assert.Equal(1, await db.CountAsync("SELECT count(*) FROM outbox_delivery WHERE id = @id AND locked_until < now() + interval '5 seconds';", ("id", waiting)));
+        await db.AssertTransitionsAsync();
+    }
+
     private static async Task<long> InsertAsync(AuditedDatabase db, string key)
     {
         await db.ExecuteAsync(

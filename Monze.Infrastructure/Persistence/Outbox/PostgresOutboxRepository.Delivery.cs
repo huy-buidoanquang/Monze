@@ -8,7 +8,8 @@ public sealed partial class PostgresOutboxRepository : IOutboxRepository
 {
     public async Task<IReadOnlyList<DueOutbox>> ClaimDueOutboxAsync(
         CancellationToken cancellationToken,
-        long? clanId = null)
+        long? clanId = null,
+        int limit = 256)
     {
         var rows = new List<DueOutbox>();
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
@@ -29,7 +30,7 @@ public sealed partial class PostgresOutboxRepository : IOutboxRepository
                       AND dependency.status = 'sent'))
               ORDER BY id
               FOR UPDATE SKIP LOCKED
-              LIMIT 256
+              LIMIT @limit
             )
             UPDATE outbox_delivery AS item
             SET status = 'sending',
@@ -63,7 +64,7 @@ public sealed partial class PostgresOutboxRepository : IOutboxRepository
                       AND dependency.status = 'sent'))
               ORDER BY id
               FOR UPDATE SKIP LOCKED
-              LIMIT 256
+              LIMIT @limit
             )
             UPDATE outbox_delivery AS item
             SET status = 'sending',
@@ -81,6 +82,7 @@ public sealed partial class PostgresOutboxRepository : IOutboxRepository
                       reply_session.voice_channel_label;
             """;
         await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("limit", Math.Clamp(limit, 1, 256));
         if (clanId is not null)
         {
             command.Parameters.AddWithValue("clan", clanId.Value);

@@ -14,13 +14,17 @@ namespace Monze.Campaign.Component;
 /// worker may starve. After the burst the workers keep polling an empty
 /// backlog, as the 250 ms outbox poll does, with the statistics the burst
 /// left behind (autovacuum is off on this throwaway database, standing in
-/// for the gap between two autoanalyze runs). Known gap CAND-17: the planner
-/// walks the primary key through the sent history on most claims and on
-/// every such poll, so claim latency grows with the history.
+/// for the gap between two autoanalyze runs). Claims take the worker's
+/// batch (<see cref="WorkerBatch"/>). Regression for CAND-17: the claim
+/// used to walk the primary key through the sent history (an idle poll read
+/// the whole table); it now reads the pending rows only.
 /// </summary>
 public static class OutboxClaimScenario
 {
     private const int HistoryFactor = 4;
+
+    /// <summary>The most the outbox worker claims at once (Monze:Outbox:MaxConcurrency default).</summary>
+    private const int WorkerBatch = 32;
     private const int IdlePolls = 20;
 
     public static async Task<IReadOnlyList<CampaignArtifact>> RunAsync(ComponentContext context)
@@ -29,7 +33,7 @@ public static class OutboxClaimScenario
         int[] workerCounts = context.Full ? [1, 2, 4, 8] : [1, 8];
         var claim = new CampaignArtifact("component", "C-OUTBOX-CLAIM", $"Outbox claim: {rows:N0} dòng due trên {rows * HistoryFactor:N0} dòng đã gửi, {string.Join('/', workerCounts)} worker, rồi poll rảnh");
         var fairness = new CampaignArtifact("component", "C-SKIPLOCKED", $"SKIP LOCKED fairness với {workerCounts[^1]} worker");
-        claim.Metric("rows", rows).KnownGap("CAND-17", "idle-poll-bounded");
+        claim.Metric("rows", rows).Metric("batch", WorkerBatch);
 
         // Largest worker count first, so the report's first metrics are the idle-poll ones.
         foreach (var workers in Enumerable.Reverse(workerCounts))
@@ -55,8 +59,7 @@ public static class OutboxClaimScenario
                 .Latency(prefix + "claim", run.Claims)
                 .Latency(prefix + "complete", run.Completions)
                 .Invariant($"{prefix}exactly-once", $"{rows:N0} dòng, mỗi dòng claim một lần", $"{run.Claimed:N0} dòng, {run.Duplicates:N0} trùng, {run.Sent:N0} sent", run.Claimed == rows && run.Duplicates == 0 && run.Sent == rows)
-                .P99AtMost($"{prefix}claim-p99", run.Claims, 50, "SLO đề xuất DB p99")
-                .KnownGap("CAND-17", $"{prefix}claim-p99");
+                .P99AtMost($"{prefix}claim-p99", run.Claims, 50, "SLO đề xuất DB p99");
             if (last)
             {
                 var perWorker = run.PerWorker;
@@ -105,7 +108,7 @@ public static class OutboxClaimScenario
                     while (true)
                     {
                         var started = Stopwatch.GetTimestamp();
-                        var batch = await repository.ClaimDueOutboxAsync(CancellationToken.None);
+                        var batch = await repository.ClaimDueOutboxAsync(CancellationToken.None, limit: WorkerBatch);
                         claims.Record(Stopwatch.GetElapsedTime(started));
                         if (batch.Count == 0)
                         {
@@ -161,7 +164,7 @@ public static class OutboxClaimScenario
             for (var i = 0; i < IdlePolls; i++)
             {
                 var started = Stopwatch.GetTimestamp();
-                var batch = await repository.ClaimDueOutboxAsync(CancellationToken.None);
+                var batch = await repository.ClaimDueOutboxAsync(CancellationToken.None, limit: WorkerBatch);
                 latency.Record(Stopwatch.GetElapsedTime(started));
                 if (batch.Count != 0)
                 {

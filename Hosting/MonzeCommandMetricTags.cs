@@ -14,6 +14,7 @@ internal static class MonzeCommandMetricTags
     public const string Cancelled = "cancelled";
     public const string Failed = "failed";
     public const string Uncertain = "uncertain";
+    public const string Shed = "shed";
 
     public static string Module(string? command)
     {

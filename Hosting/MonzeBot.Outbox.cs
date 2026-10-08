@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Mezon.Net.Sdk;
 using Microsoft.Extensions.Configuration;
@@ -10,17 +11,56 @@ namespace Monze;
 
 public sealed partial class MonzeBot
 {
+    /// <summary>A claimed row gets a send slot within this time, well inside its 60 s lease.</summary>
+    private static readonly TimeSpan OutboxClaimHorizon = TimeSpan.FromSeconds(20);
+
+    /// <summary>How often the 60 s leases of rows still being delivered are extended.</summary>
+    private static readonly TimeSpan OutboxLeaseRenewal = TimeSpan.FromSeconds(20);
+
+    /// <summary>
+    /// Delivers due outbox rows as a pipeline: up to Monze:Outbox:MaxConcurrency
+    /// deliveries run at once, and once half of them have finished the free
+    /// slots are refilled (a batch no longer waits for its slowest send). Only
+    /// rows that get a send slot from <paramref name="pacer"/> within
+    /// <see cref="OutboxClaimHorizon"/> are claimed, and the leases of rows
+    /// still being delivered (a send can also wait for the SDK's transport
+    /// budget, which commands share) are renewed while this process lives, so
+    /// only a crashed delivery is ever reconciled.
+    /// </summary>
     private async Task RunOutboxWorkerAsync(
         MezonClient client,
+        UpstreamPacer pacer,
         CancellationToken cancellationToken)
     {
+        var maxConcurrency = Math.Clamp(
+            _configuration.GetValue("Monze:Outbox:MaxConcurrency", 32),
+            1,
+            128);
+        var refill = Math.Max(1, maxConcurrency / 2);
+        var deliveries = new List<Task>(maxConcurrency);
+        var leases = new ConcurrentDictionary<long, string>();
+        using var renewalStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var renewal = RenewOutboxLeasesAsync(leases, renewalStop.Token);
+        Task? poll = null;
         var nextReconcile = _time.GetTimestamp();
         while (!cancellationToken.IsCancellationRequested)
         {
+            var moreDue = false;
             try
             {
-                while (await FlushOutboxBatchAsync(client, cancellationToken))
+                deliveries.RemoveAll(task => task.IsCompleted && ObserveOutboxDelivery(task));
+                var free = maxConcurrency - deliveries.Count;
+                var limit = Math.Min(free, pacer.Available(OutboxClaimHorizon));
+                if (free >= refill && limit > 0)
                 {
+                    var items = await _outbox.ClaimDueOutboxAsync(cancellationToken, limit: limit);
+                    MonzeMetrics.OutboxClaimed.Add(items.Count);
+                    foreach (var item in items)
+                    {
+                        deliveries.Add(DeliverOutboxAsync(client, pacer, item, leases, cancellationToken));
+                    }
+
+                    moreDue = items.Count == limit;
                 }
 
                 if (_time.GetElapsedTime(nextReconcile) >= TimeSpan.Zero)
@@ -31,45 +71,113 @@ public sealed partial class MonzeBot
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                return;
+                break;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Outbox worker iteration failed; retrying.");
             }
 
-            await Task.Delay(_timings.OutboxPollInterval, _time, cancellationToken);
+            if (moreDue && maxConcurrency - deliveries.Count >= refill)
+            {
+                continue;
+            }
+
+            try
+            {
+                // Wake on the poll interval or as soon as a delivery finishes.
+                poll ??= Task.Delay(_timings.OutboxPollInterval, _time, cancellationToken);
+                await (deliveries.Count == 0 ? poll : Task.WhenAny(deliveries.Append(poll)));
+                if (poll.IsCompleted)
+                {
+                    await poll;
+                    poll = null;
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+
+        foreach (var delivery in deliveries)
+        {
+            try
+            {
+                await delivery;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Outbox delivery failed.");
+            }
+        }
+
+        await renewalStop.CancelAsync();
+        await renewal;
+    }
+
+    private async Task RenewOutboxLeasesAsync(ConcurrentDictionary<long, string> leases, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(OutboxLeaseRenewal, _time, cancellationToken);
+                if (!leases.IsEmpty)
+                {
+                    await _outbox.RenewOutboxLeasesAsync(new Dictionary<long, string>(leases), cancellationToken);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Outbox lease renewal failed; retrying.");
+            }
         }
     }
 
-    private async Task<bool> FlushOutboxBatchAsync(
-        MezonClient client,
-        CancellationToken cancellationToken)
+    private bool ObserveOutboxDelivery(Task delivery)
     {
-        var items = await _outbox.ClaimDueOutboxAsync(cancellationToken);
-        if (items.Count == 0)
+        if (delivery.Exception is { } exception)
         {
-            return false;
+            _logger.LogWarning(exception.GetBaseException(), "Outbox delivery failed.");
         }
 
-        MonzeMetrics.OutboxClaimed.Add(items.Count);
-
-        var maxConcurrency = Math.Clamp(
-            _configuration.GetValue("Monze:Outbox:MaxConcurrency", 32),
-            1,
-            128);
-        await Parallel.ForEachAsync(
-            items,
-            new ParallelOptions
-            {
-                MaxDegreeOfParallelism = maxConcurrency,
-                CancellationToken = cancellationToken
-            },
-            async (item, ct) => await DeliverOutboxAsync(client, item, ct));
         return true;
     }
 
-    private async ValueTask DeliverOutboxAsync(
+    private async Task DeliverOutboxAsync(
+        MezonClient client,
+        UpstreamPacer pacer,
+        DueOutbox item,
+        ConcurrentDictionary<long, string> leases,
+        CancellationToken cancellationToken)
+    {
+        leases[item.Id] = item.LeaseToken;
+        try
+        {
+            // The slot is reserved before the first await, so the next claim sees it.
+            var wait = pacer.Reserve();
+            if (wait > TimeSpan.Zero)
+            {
+                await Task.Delay(wait, _time, cancellationToken);
+            }
+
+            await DeliverOutboxAsync(client, item, cancellationToken);
+        }
+        finally
+        {
+            leases.TryRemove(item.Id, out _);
+        }
+    }
+
+    private async Task DeliverOutboxAsync(
         MezonClient client,
         DueOutbox item,
         CancellationToken cancellationToken)

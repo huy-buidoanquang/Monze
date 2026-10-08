@@ -14,6 +14,17 @@ public sealed partial class MonzeBot
         Func<Task> handler)
     {
         var startedAt = _time.GetTimestamp();
+        if (Interlocked.Increment(ref _commandsInFlight) > _maxCommandsInFlight)
+        {
+            // Overloaded (the SDK starts a handler per message without a bound):
+            // drop the command unanswered rather than queue it behind the
+            // upstream budget, so the bot recovers as soon as the burst ends.
+            Interlocked.Decrement(ref _commandsInFlight);
+            _logger.LogDebug("Command shed: {InFlight} commands already in flight.", _maxCommandsInFlight);
+            MonzeMetrics.RecordCommand(MonzeCommandMetricTags.Module(module), MonzeCommandMetricTags.Shed, _time.GetElapsedTime(startedAt));
+            return;
+        }
+
         var outcome = MonzeCommandMetricTags.Failed;
         MonzeMetrics.CommandInflight.Add(1);
         try
@@ -22,6 +33,7 @@ public sealed partial class MonzeBot
         }
         finally
         {
+            Interlocked.Decrement(ref _commandsInFlight);
             MonzeMetrics.CommandInflight.Add(-1);
             MonzeMetrics.RecordCommand(
                 MonzeCommandMetricTags.Module(module),

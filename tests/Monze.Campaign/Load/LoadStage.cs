@@ -22,6 +22,9 @@ namespace Monze.Campaign.Load;
 public static class LoadStage
 {
     public const string OutboxNoncePrefix = "lo-";
+
+    /// <summary>Monze's default transport budget (Mezon:RateLimit:RequestsPerMinute), which V1 keeps.</summary>
+    private const int DefaultRequestsPerMinute = 500;
     private static readonly string[] Meters = ["Monze", "Monze.Cache", "Npgsql", "System.Runtime"];
 
     public static async Task<CampaignArtifact> RunAsync(ComponentContext context, LoadVariant variant, int registered, LoadWorkload workload)
@@ -49,6 +52,18 @@ public static class LoadStage
         });
         startWatch.Stop();
         host.Recorder.RetainLimit = 5_000;
+
+        // Requests Monze sent upstream while the window is measured, by wire
+        // operation: where the transport budget goes.
+        var requests = new System.Collections.Concurrent.ConcurrentDictionary<string, long>(StringComparer.Ordinal);
+        var counting = 0;
+        host.Recorder.Recorded += action =>
+        {
+            if (Volatile.Read(ref counting) == 1 && action.Kind is not (SimActionKind.Push or SimActionKind.Heartbeat))
+            {
+                requests.AddOrUpdate(action.Operation, 1, static (_, count) => count + 1);
+            }
+        };
         using var collector = new MetricCollector(Meters);
         var dbBefore = await DatabaseCountersAsync(host.Database.ConnectionString);
 
@@ -64,8 +79,10 @@ public static class LoadStage
         }
 
         var baseline = collector.Snapshot();
+        Volatile.Write(ref counting, 1);
         var dbAtMeasure = await DatabaseCountersAsync(host.Database.ConnectionString);
         driver.WaitForSchedule();
+        Volatile.Write(ref counting, 0);
         var measured = collector.Snapshot();
         var dbAtEnd = await DatabaseCountersAsync(host.Database.ConnectionString);
         await driver.StopAsync();
@@ -115,6 +132,8 @@ public static class LoadStage
             .Metric("ingressDropped", delta.Sum("monze.ingress.message.dropped") + delta.Sum("monze.ingress.message_gap.dropped"))
             .Metric("upstreamRateLimitDelayed", delta.Sum("monze.upstream.ratelimit.delayed"))
             .Metric("outboxDeliveredPerSecond", delta.Sum("monze.outbox.delivered") / seconds)
+            .Metric("outboxAttemptMeanMs", delta.Count("monze.outbox.attempt_duration") == 0 ? 0 : delta.Sum("monze.outbox.attempt_duration") / delta.Count("monze.outbox.attempt_duration"))
+            .Metric("outboxAttemptMaxMs", delta.Max("monze.outbox.attempt_duration"))
             .Metric("socketReconnects", delta.Sum("monze.socket.reconnect"))
             .Metric("gcCollections", measured.Sum("dotnet.gc.collections") - baseline.Sum("dotnet.gc.collections"))
             .Metric("allocatedMiBPerSecond", (measured.Sum("dotnet.gc.heap.total_allocated") - baseline.Sum("dotnet.gc.heap.total_allocated")) / seconds / (1024 * 1024))
@@ -124,6 +143,10 @@ public static class LoadStage
             .Metric("dbRowsWrittenPerSecond", (dbAtEnd.RowsWritten - dbAtMeasure.RowsWritten) / seconds)
             .Metric("dbTransactionsTotal", dbAtEnd.Commits - dbBefore.Commits)
             .Metric("hostErrors", hostErrors);
+        foreach (var (operation, count) in requests.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+        {
+            artifact.Metric($"requests.{operation}PerSecond", count / seconds);
+        }
 
         artifact.P99AtMost("command-p99", tracker.Commands, 1_000, "SLO đề xuất lệnh p99 ≤ 1 s")
             .Invariant("command-p95", "p95 ≤ 500 ms (SLO đề xuất)", Ms(tracker.Commands, 95), tracker.Commands.Count > 0 && tracker.Commands.ValueAtPercentile(95) <= 500_000)
@@ -142,15 +165,27 @@ public static class LoadStage
             .DbInvariants(violations);
         if (variant.AckLatency)
         {
-            // CAND-20: with a 30 ms median ack the outbox delivers ~150/s, below the documented 200/s.
+            // CAND-20: the SDK sends one message per channel at a time, so with a
+            // 30 ms median ack the load world's outbox channels carry ~160/s, below
+            // the documented 200/s.
             artifact.KnownGap("CAND-20", "outbox-p99").KnownGap("CAND-20", "outbox-exactly-once");
         }
 
         if (variant == LoadVariant.V1)
         {
+            // Regression for DEF-03: the minute budget is spent evenly instead of
+            // in a few seconds followed by silence for the rest of the minute.
+            var paced = requests.Values.Sum() / seconds;
+            artifact.Invariant(
+                "budget-paced",
+                $"Monze dùng đều ngân sách transport (≥ 80 % của {DefaultRequestsPerMinute}/phút trong cửa sổ đo)",
+                $"{paced:0.0} request/s",
+                paced >= 0.8 * DefaultRequestsPerMinute / 60.0);
+
+            // DEF-13: the documented workload needs ~240 requests/s; one bot connection gets ~8.
             foreach (var invariant in new[] { "command-p99", "command-p95", "button-p99", "welcome-p95", "outbox-p99", "commands-answered", "interactions-answered", "outbox-exactly-once" })
             {
-                artifact.KnownGap("DEF-03", invariant);
+                artifact.KnownGap("DEF-13", invariant);
             }
         }
 

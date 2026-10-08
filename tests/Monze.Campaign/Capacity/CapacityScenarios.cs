@@ -429,11 +429,6 @@ public static class CapacityScenarios
             .Invariant("still-serving", "sau bão vẫn trả lời lệnh trong 10 s", serving ? "có" : "không", serving)
             .Invariant("bounded-memory", "heap sau GC tăng ≤ 128 MiB", Mib(growth), growth <= 128)
             .Invariant("host-clean", "không có log Critical", $"{host.Logs.CountAtLeast(LogLevel.Critical)}", host.Logs.CountAtLeast(LogLevel.Critical) == 0);
-        if (variant == LoadVariant.V1)
-        {
-            artifact.KnownGap("DEF-03", "settled").KnownGap("DEF-03", "still-serving");
-        }
-
         return artifact;
     }
 

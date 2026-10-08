@@ -2,9 +2,19 @@ namespace Monze.Application;
 
 public interface IOutboxRepository
 {
+    /// <summary>Claims up to <paramref name="limit"/> (at most 256) due rows, oldest first.</summary>
     Task<IReadOnlyList<DueOutbox>> ClaimDueOutboxAsync(
         CancellationToken cancellationToken,
-        long? clanId = null);
+        long? clanId = null,
+        int limit = 256);
+
+    /// <summary>
+    /// Extends the 60 s lease of rows this process is still delivering (id to
+    /// lease token), so a send waiting for upstream capacity is never taken
+    /// for a lost one. Rows no longer 'sending' under that token are skipped.
+    /// </summary>
+    Task RenewOutboxLeasesAsync(IReadOnlyDictionary<long, string> leases, CancellationToken cancellationToken);
+
     /// <summary>
     /// Ends a delivery attempt: sent with <paramref name="externalMessageId"/>,
     /// held ('uncertain') when <paramref name="failed"/>, otherwise back to

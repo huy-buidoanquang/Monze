@@ -88,6 +88,37 @@ public sealed partial class PostgresOutboxRepository
         return rows;
     }
 
+    public async Task RenewOutboxLeasesAsync(IReadOnlyDictionary<long, string> leases, CancellationToken cancellationToken)
+    {
+        if (leases.Count == 0)
+        {
+            return;
+        }
+
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            UPDATE outbox_delivery AS item
+            SET locked_until = now() + interval '60 seconds'
+            FROM unnest(@ids, @tokens) AS lease(id, token)
+            WHERE item.id = lease.id
+              AND item.lease_token = lease.token
+              AND item.status = 'sending';
+            """, connection);
+        var ids = new long[leases.Count];
+        var tokens = new string[leases.Count];
+        var index = 0;
+        foreach (var (id, token) in leases)
+        {
+            ids[index] = id;
+            tokens[index] = token;
+            index++;
+        }
+
+        command.Parameters.AddWithValue("ids", ids);
+        command.Parameters.AddWithValue("tokens", tokens);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task RequeueUncertainOutboxAsync(long id, string leaseToken, CancellationToken cancellationToken)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
