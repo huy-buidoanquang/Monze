@@ -66,7 +66,7 @@ public sealed record SimHttpHostOptions
 /// </list>
 /// Every request is recorded without its query string. Unknown paths answer
 /// 404 and are recorded in <see cref="Unmodelled"/>. Scripted faults:
-/// <see cref="Faults"/> (delay, status, hang, empty, oversized, malformed per
+/// <see cref="Faults"/> (delay, status, hang, empty, oversized, malformed and slow-drip per
 /// route) and the SSE stream controls (duplicate, held/reordered and raw
 /// frames, dropped and half-open streams).
 /// </summary>
@@ -742,6 +742,13 @@ public sealed class SimHttpHost : IAsyncDisposable
             return;
         }
 
+        if (terminal?.Kind == SimHttpFaultKind.Drip)
+        {
+            Record(SimHttpRoute.TranscriptSummary, "GET", path, 200, SimHttpFaultKind.Drip);
+            await DripJsonAsync(context, summary, terminal.Delay, token).ConfigureAwait(false);
+            return;
+        }
+
         Record(SimHttpRoute.TranscriptSummary, "GET", path, 200, null);
         await WriteJsonAsync(context, 200, summary, token).ConfigureAwait(false);
     }
@@ -793,7 +800,7 @@ public sealed class SimHttpHost : IAsyncDisposable
             return;
         }
 
-        Record(SimHttpRoute.AiCompletion, "POST", path, 200, null);
+        Record(SimHttpRoute.AiCompletion, "POST", path, 200, terminal?.Kind == SimHttpFaultKind.Drip ? SimHttpFaultKind.Drip : null);
         var answer = new
         {
             id = $"sim-completion-{Interlocked.Increment(ref _completions)}",
@@ -801,6 +808,12 @@ public sealed class SimHttpHost : IAsyncDisposable
             model = parsed.Model,
             choices = new[] { new { index = 0, message = new { role = "assistant", content = Options.AiReply(parsed) }, finish_reason = "stop" } }
         };
+        if (terminal?.Kind == SimHttpFaultKind.Drip)
+        {
+            await DripJsonAsync(context, JsonSerializer.Serialize(answer, Json), terminal.Delay, token).ConfigureAwait(false);
+            return;
+        }
+
         await WriteJsonAsync(context, 200, JsonSerializer.Serialize(answer, Json), token).ConfigureAwait(false);
     }
 
@@ -824,6 +837,23 @@ public sealed class SimHttpHost : IAsyncDisposable
                 return true;
             default:
                 return false;
+        }
+    }
+
+    /// <summary>Writes <paramref name="json"/> one byte per <see cref="SimHttpFault.Delay"/> after sending the headers.</summary>
+    private static async Task DripJsonAsync(HttpContext context, string json, TimeSpan perByte, CancellationToken token)
+    {
+        context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+        context.Response.StatusCode = 200;
+        context.Response.ContentType = "application/json";
+        var bytes = Encoding.UTF8.GetBytes(json);
+        context.Response.ContentLength = bytes.Length;
+        await context.Response.StartAsync(token).ConfigureAwait(false);
+        for (var i = 0; i < bytes.Length; i++)
+        {
+            await context.Response.Body.WriteAsync(bytes.AsMemory(i, 1), token).ConfigureAwait(false);
+            await context.Response.Body.FlushAsync(token).ConfigureAwait(false);
+            await Task.Delay(perByte, token).ConfigureAwait(false);
         }
     }
 

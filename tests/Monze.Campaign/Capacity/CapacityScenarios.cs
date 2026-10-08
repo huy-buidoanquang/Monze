@@ -19,9 +19,10 @@ namespace Monze.Campaign.Capacity;
 /// - BP-7: a rejoin storm with 1,000 registered clans;
 /// - BP-8: the discovery boundary (99 vs 100 visible clans, and DEF-06 with
 ///   150 member clans).
-/// BP-2 (gap queue) and BP-3 (Agent pending writers) need hundreds of
-/// dropping channels and the Agent SSE fake, so they are recorded as
-/// BLOCKED.
+/// - BP-2: the message-gap queue when 300 persisting channels drop messages
+///   at once (message capacity 1,024);
+/// - BP-3: the Agent ingress queue (capacity 128) and its pending writers
+///   under a burst of 2,000 events through the Agent SSE fake.
 /// </summary>
 public static class CapacityScenarios
 {
@@ -31,8 +32,8 @@ public static class CapacityScenarios
     public static IReadOnlyList<(string Id, Func<ComponentContext, Task<CampaignArtifact>> Run)> All { get; } =
     [
         ("BP-1", LaneOverflowAsync),
-        ("BP-2", static _ => Task.FromResult(new CampaignArtifact("capacity", "BP-2", "Tràn hàng đợi gap").Block("Cần hàng trăm channel cùng rơi tin; chưa có trong revision này."))),
-        ("BP-3", static _ => Task.FromResult(new CampaignArtifact("capacity", "BP-3", "Pending writer của hàng đợi Agent").Block("Cần fake Agent SSE (SimHttpHost)."))),
+        ("BP-2", GapQueueOverflowAsync),
+        ("BP-3", AgentBurstAsync),
         ("BP-4", WelcomeStormAsync),
         ("BP-5", static context => CommandStormAsync(context, LoadVariant.V3)),
         ("BP-5-V1", static context => CommandStormAsync(context, LoadVariant.V1)),
@@ -86,6 +87,217 @@ public static class CapacityScenarios
             .Metric("heapGrowthMiB", growth)
             .Invariant("bounded-queue", $"độ sâu ingress ≤ {ConfiguredMessageCapacity:N0}", $"đỉnh {maxDepth:0}", maxDepth <= ConfiguredMessageCapacity)
             .Invariant("drops-marked-as-gap", "tin bị rơi được đánh dấu gap cho channel", $"{dropped:0} rơi, {gapChannels} channel có gap", dropped == 0 || gapChannels > 0)
+            .Invariant("still-serving", "sau burst vẫn trả lời lệnh trong 10 s", serving ? "có" : "không", serving)
+            .Invariant("bounded-memory", "heap sau GC tăng ≤ 128 MiB", Mib(growth), growth <= 128)
+            .Invariant("host-clean", "không có log Critical", $"{host.Logs.CountAtLeast(LogLevel.Critical)}", host.Logs.CountAtLeast(LogLevel.Critical) == 0);
+    }
+
+    /// <summary>
+    /// 300 persisting chat channels (100 clans × 3) receive a burst much
+    /// larger than the message ingress holds (the smallest accepted
+    /// Monze:Queues:MessageCapacity, 1,024 = 64 per lane; with the default
+    /// 8,192 the 16 lanes keep up with one socket), so thousands of messages
+    /// drop and each drop queues a gap marker for its channel (capacity
+    /// 1,024 / 4 = 256, one consumer that writes one row per channel and
+    /// batch). Afterwards the
+    /// host is stopped (the SQLite store flushes) and every channel whose
+    /// store holds fewer messages than were pushed to it must be marked
+    /// has_gap, otherwise an AI summary of that channel would silently miss
+    /// messages.
+    /// </summary>
+    private static async Task<CampaignArtifact> GapQueueOverflowAsync(ComponentContext context)
+    {
+        const int Wave = 20_000, Capacity = 1_024, GapCapacity = Capacity / 4;
+        var total = context.Full ? 150_000 : 60_000;
+        var artifact = new CampaignArtifact("capacity", "BP-2", $"Tràn hàng đợi gap: {total:N0} tin vào 300 channel lưu lịch sử cùng lúc (MessageCapacity {Capacity:N0})");
+        var world = LoadWorld.Create(100);
+        await using var host = await StartAsync(context, world, "bp2", configuration: new Dictionary<string, string?>
+        {
+            ["Monze:Queues:MessageCapacity"] = Capacity.ToString(CultureInfo.InvariantCulture)
+        });
+        using var collector = new MetricCollector(Meters);
+        var heapBefore = SettledHeap();
+        var channels = world.Clans.SelectMany(static clan => clan.Chat.Select(channel => (clan, channel))).ToArray();
+        var pushed = new Dictionary<long, long>();
+        double maxGapDepth = 0;
+        using var sampling = new CancellationTokenSource();
+        var sampler = Task.Run(async () =>
+        {
+            while (!sampling.IsCancellationRequested)
+            {
+                maxGapDepth = Math.Max(maxGapDepth, collector.Snapshot().Sum("monze.ingress.message_gap.depth"));
+                await Task.Delay(20);
+            }
+        });
+        var baseline = collector.Snapshot();
+        var watch = Stopwatch.StartNew();
+        for (var wave = 0; wave < total; wave += Wave)
+        {
+            var size = Math.Min(Wave, total - wave);
+            await Task.WhenAll(Enumerable.Range(wave, size).Select(i =>
+            {
+                var (clan, channel) = channels[i % channels.Length];
+                return host.Inbound.SayAsync(clan.Id, channel, clan.Members[i % clan.Members.Count], "gap " + i.ToString(CultureInfo.InvariantCulture));
+            }));
+            for (var i = wave; i < wave + size; i++)
+            {
+                var channel = channels[i % channels.Length].channel;
+                pushed[channel] = pushed.GetValueOrDefault(channel) + 1;
+            }
+        }
+
+        var burstSeconds = watch.Elapsed.TotalSeconds;
+        await Task.Delay(TimeSpan.FromSeconds(15));
+        await sampling.CancelAsync();
+        await sampler;
+        var delta = collector.Snapshot().Since(baseline);
+        var marked = new HashSet<long>();
+        foreach (var row in await host.RowsAsync("SELECT channel_id FROM channel_policy WHERE has_gap;"))
+        {
+            marked.Add((long)row[0]!);
+        }
+
+        var serving = await LoadProbe.AnswersAsync(host, world, TimeSpan.FromSeconds(10));
+        var growth = (SettledHeap() - heapBefore) / (1024.0 * 1024.0);
+        await host.StopHostAsync();
+        var stored = await StoredMessagesAsync(host.DataDirectory, channels.Select(static entry => entry.channel).ToArray());
+        var lossy = pushed.Where(entry => stored.GetValueOrDefault(entry.Key) < entry.Value).Select(static entry => entry.Key).ToList();
+        var unmarked = lossy.Count(channel => !marked.Contains(channel));
+
+        // A gap marker that finds the gap queue full is dropped with no fallback: its channel
+        // keeps has_gap = false although messages are missing.
+        return artifact.KnownGap("WF-07", "lossy-channels-marked")
+            .Metric("pushed", total)
+            .Metric("pushPerSecond", total / burstSeconds)
+            .Metric("messagesDropped", delta.Sum("monze.ingress.message.dropped"))
+            .Metric("gapMarkersDropped", delta.Sum("monze.ingress.message_gap.dropped"))
+            .Metric("maxGapDepth", maxGapDepth)
+            .Metric("channelsWithLoss", lossy.Count)
+            .Metric("channelsMarked", marked.Count)
+            .Metric("lossyUnmarked", unmarked)
+            .Metric("messagesStored", stored.Values.Sum())
+            .Metric("heapGrowthMiB", growth)
+            .Invariant("bounded-gap-queue", $"hàng đợi gap ≤ {GapCapacity:N0} (MessageCapacity / 4)", $"đỉnh {maxGapDepth:0}", maxGapDepth <= GapCapacity)
+            .Invariant("lossy-channels-marked", "mọi channel mất tin (SQLite ít hơn số tin đã đẩy) được đánh dấu has_gap", $"{unmarked} chưa đánh dấu / {lossy.Count} channel mất tin", unmarked == 0)
+            .Invariant("still-serving", "sau burst vẫn trả lời lệnh trong 10 s", serving ? "có" : "không", serving)
+            .Invariant("bounded-memory", "heap sau GC tăng ≤ 128 MiB", Mib(growth), growth <= 128)
+            .Invariant("host-clean", "không có log Critical", $"{host.Logs.CountAtLeast(LogLevel.Critical)}", host.Logs.CountAtLeast(LogLevel.Critical) == 0);
+    }
+
+    /// <summary>Messages per channel in the SDK's SQLite message store of a stopped host.</summary>
+    private static async Task<Dictionary<long, long>> StoredMessagesAsync(DirectoryInfo dataDirectory, long[] channels)
+    {
+        var counts = new Dictionary<long, long>();
+        foreach (var file in new DirectoryInfo(Path.Combine(dataDirectory.FullName, "data")).GetFiles("*.db"))
+        {
+            await using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={file.FullName};Mode=ReadOnly;Pooling=False");
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT channel_id, count(*) FROM messages GROUP BY channel_id;";
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var channel = reader.GetInt64(0);
+                if (channels.Contains(channel))
+                {
+                    counts[channel] = counts.GetValueOrDefault(channel) + reader.GetInt64(1);
+                }
+            }
+        }
+
+        return counts;
+    }
+
+    /// <summary>
+    /// 1,998 Agent events (666 rooms × started, ended, summary done) burst
+    /// through the Agent SSE fake into an Agent ingress of capacity 128 (the
+    /// smallest Monze:Queues:AgentCapacity accepts). The SDK does not wait
+    /// for Monze's handler, so every event past the capacity becomes a
+    /// pending writer. Every room must still end up with its summary posted,
+    /// the queue must stay bounded and the pending writers must drain.
+    /// </summary>
+    private static async Task<CampaignArtifact> AgentBurstAsync(ComponentContext context)
+    {
+        const int Rooms = 666, Events = Rooms * 3;
+        var artifact = new CampaignArtifact("capacity", "BP-3", $"Burst {Events:N0} event Agent vào hàng đợi Agent capacity 128");
+        var world = LoadWorld.Create(10);
+        var clans = Chaos.AgentClan.AddTo(world.World);
+        await using var http = await SimHttpHost.StartAsync(new SimHttpHostOptions { BotId = world.BotId, BotToken = world.World.Bot.Token });
+        await using var host = await StartAsync(context, world, "bp3", configuration: new Dictionary<string, string?>
+        {
+            ["Mezon:AgentBaseUrl"] = http.BaseUrl,
+            ["Monze:Queues:AgentCapacity"] = "128"
+        });
+        await http.WaitForSseAsync(1, TimeSpan.FromSeconds(30));
+        using var collector = new MetricCollector(Meters);
+        var heapBefore = SettledHeap();
+        var rooms = new List<(string Room, long Clan, long Voice)>();
+        for (var i = 0; i < Rooms; i++)
+        {
+            var clan = clans[i % clans.Count];
+            var room = $"bp3-room-{i.ToString(CultureInfo.InvariantCulture)}";
+            rooms.Add((room, clan.Id, clan.Voices[(i / clans.Count) % clan.Voices.Count]));
+            http.SetSummary(room, SimHttpHost.SummaryJson(room, "Tóm tắt burst."));
+        }
+
+        double maxDepth = 0, maxPending = 0;
+        using var sampling = new CancellationTokenSource();
+        var sampler = Task.Run(async () =>
+        {
+            while (!sampling.IsCancellationRequested)
+            {
+                var snapshot = collector.Snapshot();
+                maxDepth = Math.Max(maxDepth, snapshot.Sum("monze.ingress.agent.depth"));
+                maxPending = Math.Max(maxPending, snapshot.Sum("monze.ingress.agent.pending_writers"));
+                await Task.Delay(20);
+            }
+        });
+        var baseline = collector.Snapshot();
+        var watch = Stopwatch.StartNew();
+        var lost = 0;
+        foreach (var (room, clan, voice) in rooms)
+        {
+            foreach (var type in new[] { "room_started", "room_ended", "room_summary_done" })
+            {
+                lost += await http.PublishAgentEventAsync(type, room, voice, clan) == 0 ? 1 : 0;
+            }
+        }
+
+        var publishSeconds = watch.Elapsed.TotalSeconds;
+        long posted = 0;
+        while (watch.Elapsed < TimeSpan.FromSeconds(180))
+        {
+            posted = await host.ScalarAsync<long>("SELECT count(*) FROM meeting_session WHERE room_id LIKE 'bp3-room-%' AND status = 'posted';");
+            if (posted == rooms.Count)
+            {
+                break;
+            }
+
+            await Task.Delay(500);
+        }
+
+        var drained = watch.Elapsed;
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        await sampling.CancelAsync();
+        await sampler;
+        var settled = collector.Snapshot();
+        var delta = settled.Since(baseline);
+        var serving = await LoadProbe.AnswersAsync(host, world, TimeSpan.FromSeconds(10));
+        var growth = (SettledHeap() - heapBefore) / (1024.0 * 1024.0);
+        var pendingAfter = settled.Sum("monze.ingress.agent.pending_writers");
+        return artifact.Metric("events", Events)
+            .Metric("eventsLostUpstream", lost)
+            .Metric("publishSeconds", publishSeconds)
+            .Metric("drainSeconds", drained.TotalSeconds)
+            .Metric("roomsPosted", posted)
+            .Metric("maxDepth", maxDepth)
+            .Metric("maxPendingWriters", maxPending)
+            .Metric("backpressure", delta.Sum("monze.ingress.agent.backpressure"))
+            .Metric("eventsIgnored", delta.Sum("monze.agent.events.ignored"))
+            .Metric("heapGrowthMiB", growth)
+            .Invariant("all-posted", $"{rooms.Count} phòng đều được tóm tắt trong 180 s", $"{posted}/{rooms.Count} sau {drained.TotalSeconds:0} s", posted == rooms.Count)
+            .Invariant("bounded-queue", "hàng đợi Agent ≤ 128", $"đỉnh {maxDepth:0}", maxDepth <= 128)
+            .Invariant("pending-drained", "pending writer về 0 sau burst", $"{pendingAfter:0}", pendingAfter == 0)
             .Invariant("still-serving", "sau burst vẫn trả lời lệnh trong 10 s", serving ? "có" : "không", serving)
             .Invariant("bounded-memory", "heap sau GC tăng ≤ 128 MiB", Mib(growth), growth <= 128)
             .Invariant("host-clean", "không có log Critical", $"{host.Logs.CountAtLeast(LogLevel.Critical)}", host.Logs.CountAtLeast(LogLevel.Critical) == 0);
@@ -348,11 +560,13 @@ public static class CapacityScenarios
         string tag,
         MezonSimulatorOptions? simulator = null,
         Func<Monze.Testing.Postgres.CampaignDatabase, Task>? seed = null,
-        LoadTracker? attach = null)
+        LoadTracker? attach = null,
+        IReadOnlyDictionary<string, string?>? configuration = null)
     {
         var host = await SimulatedMonzeHost.StartAsync(world.World, context.Server, $"capacity_{tag}", new SimulatedMonzeHostOptions
         {
             Simulator = simulator,
+            Configuration = configuration ?? new Dictionary<string, string?>(),
             Logs = new HostLogSink(LogLevel.Warning, capacity: 20_000),
             SeedAsync = seed ?? world.SeedAsync,
             StartTimeout = TimeSpan.FromMinutes(5),

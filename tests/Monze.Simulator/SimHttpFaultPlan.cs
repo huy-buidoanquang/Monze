@@ -37,7 +37,10 @@ public enum SimHttpFaultKind
     Oversized,
 
     /// <summary>200 with invalid JSON (SSE: garbage frames, then the stream goes on).</summary>
-    Malformed
+    Malformed,
+
+    /// <summary>200 whose valid body arrives one byte per <see cref="SimHttpFault.Delay"/> (a slow-drip response).</summary>
+    Drip
 }
 
 /// <summary>A scripted HTTP fault.</summary>
@@ -80,6 +83,13 @@ public sealed class SimHttpFaultPlan
 
     public SimHttpFaultPlan Malformed(SimHttpRoute route, int times = 1)
         => Add(new SimHttpFault(SimHttpFaultKind.Malformed, route, TimeSpan.Zero, 200, 0), times);
+
+    /// <summary>Answer normally, but write the body one byte every <paramref name="perByte"/> (headers go out at once).</summary>
+    public SimHttpFaultPlan Drip(SimHttpRoute route, TimeSpan perByte, int times = 1)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(perByte, TimeSpan.Zero);
+        return Add(new SimHttpFault(SimHttpFaultKind.Drip, route, perByte, 200, 0), times);
+    }
 
     /// <summary>Removes every pending rule.</summary>
     public void Clear()

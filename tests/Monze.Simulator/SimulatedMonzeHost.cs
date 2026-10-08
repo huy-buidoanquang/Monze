@@ -278,6 +278,54 @@ public sealed class SimulatedMonzeHost : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Emulates a crash as closely as an in-process host allows: the
+    /// platform drops this host's sockets first (as it would for a dead
+    /// process, so no clean client close is sent), then the host is stopped
+    /// with an already-cancelled token, so hosted services do not wait for
+    /// their workers to drain (leases stay taken, queues and the SQLite
+    /// store are not flushed), and the host is disposed. Unlike a real kill,
+    /// code already running finishes its current await before it observes the
+    /// cancellation, so a database statement in flight still completes.
+    /// </summary>
+    public async Task KillHostAsync()
+    {
+        if (Interlocked.Exchange(ref _hostStopped, 1) != 0)
+        {
+            return;
+        }
+
+        foreach (var session in OwnSessions)
+        {
+            await session.CloseFromServerAsync("host killed");
+        }
+
+        try
+        {
+            await _host.StopAsync(new CancellationToken(canceled: true));
+        }
+        catch (Exception)
+        {
+            // An abandoned stop surfaces cancellations from every hosted service.
+        }
+
+        try
+        {
+            if (_host is IAsyncDisposable asyncDisposable)
+            {
+                await asyncDisposable.DisposeAsync();
+            }
+            else
+            {
+                _host.Dispose();
+            }
+        }
+        catch (Exception)
+        {
+            // Disposing under running workers may race their last calls; a crash would not clean up either.
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
