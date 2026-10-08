@@ -188,18 +188,17 @@ public sealed partial class MonzeBot
     {
         var serverAuthenticated = context.Interaction is IInteractionActor actor
             && actor.ActorTrust == InteractionActorTrust.ServerAuthenticated;
+
+        // Only the exact ephemeral message the bot sent to its owner is
+        // accepted. The click's user id is client-supplied (mezon-api forwards
+        // MessageButtonClicked unchanged), so a binding by user alone would let
+        // anyone act for a user who has any private interaction open.
         var messageId = context.Interaction.MessageId;
         var ownerId = 0L;
         var hasBinding = messageId > 0
             && _policyCache.TryGetValue(
                 PrivateInteractionKey(context.Channel.ClanId, context.Channel.Id, messageId),
                 out ownerId);
-        if (!hasBinding)
-        {
-            hasBinding = _policyCache.TryGetValue(
-                PrivateInteractionUserKey(context.Channel.ClanId, context.Channel.Id, context.User.Id),
-                out ownerId);
-        }
 
         var canHandle = hasBinding
             && ownerId > 0
@@ -257,23 +256,27 @@ public sealed partial class MonzeBot
             return;
         }
 
-        var cacheOptions = new MemoryCacheEntryOptions
+        if (messageId <= 0)
         {
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30),
-            Size = 1
-        };
-        _policyCache.Set(PrivateInteractionUserKey(clanId, channelId, userId), userId, cacheOptions);
-        if (messageId > 0)
-        {
-            _policyCache.Set(PrivateInteractionKey(clanId, channelId, messageId), userId, cacheOptions);
+            _logger.LogWarning(
+                "Private interaction cannot be bound because the send acknowledgement has no message id. Clan={ClanId}, Channel={ChannelId}.",
+                clanId,
+                channelId);
+            return;
         }
+
+        _policyCache.Set(
+            PrivateInteractionKey(clanId, channelId, messageId),
+            userId,
+            new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30),
+                Size = 1
+            });
     }
 
     private static string PrivateInteractionKey(long clanId, long channelId, long messageId)
         => $"monze:private-interaction:{clanId}:{channelId}:{messageId}";
-
-    private static string PrivateInteractionUserKey(long clanId, long channelId, long userId)
-        => $"monze:private-interaction-user:{clanId}:{channelId}:{userId}";
 
     private static bool HasInteractiveComponents(MessageContent content)
     {

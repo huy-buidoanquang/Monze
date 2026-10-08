@@ -11,15 +11,17 @@ namespace Monze.Tests.E2E.Workflows;
 /// <summary>
 /// G32, the decision table of EnsurePrivateInteractionAsync
 /// (Hosting/MonzeBot.InteractionResponses.cs lines 187-235) as the real host
-/// applies it to the meeting-list Refresh button: a binding by
-/// (clan, channel, message) wins; without one the (clan, channel, user)
-/// binding of the clicking user is used; both expire 30 minutes after they
-/// were last set; the click is handled only when the binding's user is the
-/// clicking user. Honest clicks come from the user's own client; forged
-/// clicks are MessageButtonClicked events with a chosen user and message id,
-/// which mezon-api forwards unchanged and the SDK marks server-authenticated.
-/// Honest rows must match the correct outcome; forged rows Monze accepts are
-/// CAND-19 (known defect). The cache clock is moved, not waited for.
+/// applies it to the meeting-list Refresh button: only a binding by
+/// (clan, channel, message) counts (the (clan, channel, user) fallback was
+/// removed for CAND-19); it expires 30 minutes after it was last set; the
+/// click is handled only when the binding's user is the clicking user.
+/// Honest clicks come from the user's own client; forged clicks are
+/// MessageButtonClicked events with a chosen user and message id, which
+/// mezon-api forwards unchanged and the SDK marks server-authenticated.
+/// Honest rows must match the correct outcome. The one forged row Monze
+/// still accepts (R2: the owner's id forged on the owner's own card) can only
+/// be closed by mezon-api setting user_id from the session; it stays CAND-19.
+/// The cache clock is moved, not waited for.
 /// </summary>
 public sealed class PrivateInteractionDecisionTableTests(ITestOutputHelper output)
 {
@@ -49,12 +51,13 @@ public sealed class PrivateInteractionDecisionTableTests(ITestOutputHelper outpu
         await RunAsync(host, rows, "R5 user fallback, other user's message forged", honest: false, Member2Id, publicReply, correct: false);
         await RunAsync(host, rows, "R6 no binding for the user, forged", honest: false, AdminId, publicReply, correct: false);
 
-        // 20 minutes later the member opens help (refreshing the user binding);
-        // 15 minutes after that the card's message binding has expired.
+        // 20 minutes later the member opens help (a new private message);
+        // 15 minutes after that the card's own binding has expired, and the
+        // newer help binding must not revive it.
         clock.Advance(TimeSpan.FromMinutes(20));
         var help = await E2EActions.CommandAsync(host, GeneralId, MemberId, "*monze help");
         clock.Advance(TimeSpan.FromMinutes(15));
-        await RunAsync(host, rows, "R4 user fallback, owner", honest: true, MemberId, card, correct: true);
+        await RunAsync(host, rows, "R4 card binding expired, newer help open, owner", honest: true, MemberId, card, correct: false);
 
         // 31 minutes later every binding has expired.
         clock.Advance(TimeSpan.FromMinutes(31));
@@ -72,7 +75,7 @@ public sealed class PrivateInteractionDecisionTableTests(ITestOutputHelper outpu
 
         Assert.All(rows.Where(static row => row.Honest), static row => Assert.Equal(row.Correct, row.Accepted));
         var forgedAccepted = rows.Where(static row => !row.Honest && row.Accepted).Select(static row => row.Name).ToList();
-        Assert.Equal(new[] { "R2 message binding, owner id forged", "R5 user fallback, other user's message forged" }, forgedAccepted);
+        Assert.Equal(new[] { "R2 message binding, owner id forged" }, forgedAccepted);
         KnownDefect.ExpectFailure("CAND-19", () => Assert.Empty(forgedAccepted));
         await E2EOracles.AssertInvariantsAsync(host);
     }

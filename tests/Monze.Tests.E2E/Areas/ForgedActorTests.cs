@@ -9,16 +9,13 @@ using static Monze.Tests.E2E.Harness.AreaWorld;
 namespace Monze.Tests.E2E.Areas;
 
 /// <summary>
-/// Known gap CAND-19: a click event carries a client-supplied user_id.
+/// Regression for CAND-19: a click event carries a client-supplied user_id.
 /// mezon-api MessageButtonClick (server/api_interactive_message.go) forwards
-/// the client's MessageButtonClicked unchanged (DropdownBoxSelected right
-/// below overwrites user_id with the session user), Mezon.Net.Sdk 1.6.2
-/// InteractionRouter marks every click ServerAuthenticated, and Monze's
-/// EnsurePrivateInteractionAsync (Hosting/MonzeBot.InteractionResponses.cs)
-/// falls back to the (clan, channel, user) binding when the message id has
-/// none. While the owner has a welcome setup open in a channel, any member
-/// can send WelcomeSave with user_id = owner, any message id and their own
-/// extra_data, and EnsureWelcomeAdministratorAsync checks the forged id.
+/// the client's MessageButtonClicked unchanged and Mezon.Net.Sdk 1.6.2 marks
+/// every click ServerAuthenticated. Monze used to fall back to a
+/// (clan, channel, user) binding, so while the owner had a welcome setup
+/// open any member could save it with user_id = owner and any message id.
+/// Only the exact ephemeral message bound to its owner is accepted now.
 /// </summary>
 public sealed class ForgedActorTests
 {
@@ -38,14 +35,14 @@ public sealed class ForgedActorTests
         // names a message member 2 can see, the bot as sender and the owner as user.
         var attack = await E2EOracles.MarkAsync(host, snapshot: true);
         var forged = await E2EActions.ForgeClickAsync(host, GeneralId, chat.MessageId, OwnerId, MonzeButtonId.WelcomeSave, Form("Hijacked by member2"));
-        await KnownDefect.ExpectFailureAsync("CAND-19", () => E2EOracles.AssertAsync(host, attack, new ScenarioExpectation
+        await E2EOracles.AssertAsync(host, attack, new ScenarioExpectation
         {
             Inputs = ScenarioExpectation.Of((forged, ResponseKind.None)).Inputs,
             Unauthorized = true
-        }));
+        });
 
         // Control: the same click from the owner's own client saves, so the
-        // expected failure above is about the forgery, not a broken flow.
+        // rejection above is about the forgery, not a broken flow.
         var control = await E2EOracles.MarkAsync(host);
         var save = await E2EActions.ClickAsync(host, GeneralId, form, OwnerId, MonzeButtonId.WelcomeSave, Form("Owner title"));
         await E2EOracles.AssertAsync(host, control, ScenarioExpectation.Of((save, ResponseKind.Update)));
