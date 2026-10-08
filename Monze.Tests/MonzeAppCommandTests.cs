@@ -325,6 +325,42 @@ public sealed class MonzeAppCommandTests
         Assert.Empty(dependencies.RecordedRoleGrants);
     }
 
+    /// <summary>Regression for CAND-24: a grant that keeps failing is retried on the next scan, then less and less often.</summary>
+    [Fact]
+    [Req("REQ-ROLE-002")]
+    public async Task Automatic_roles_back_off_a_grant_that_keeps_failing()
+    {
+        var dependencies = new MonzeAppTestDependencies
+        {
+            RoleAutomationEnabled = true,
+            RoleAssignment = new RoleAssignmentResult(false, 0),
+            RoleRules = [new AutoRoleRule(ClanId, 70, RoleRuleKind.OnJoin, null, 1)],
+            Members = [new MemberRoleSnapshot(3, false, DateTimeOffset.UtcNow, new HashSet<long>())]
+        };
+        var app = dependencies.CreateApp(withRoleGateway: true);
+        var attemptsAfterScan = new List<int>();
+
+        for (var scan = 0; scan < 9; scan++)
+        {
+            await app.ApplyAutomaticRoleRulesAsync(CancellationToken.None);
+            attemptsAfterScan.Add(dependencies.RoleAssignments.Count);
+        }
+
+        // Attempts on scans 1, 2, 4 and 8: one scan skipped after the second failure, three after the third.
+        Assert.Equal(new[] { 1, 2, 2, 3, 3, 3, 3, 4, 4 }, attemptsAfterScan);
+        Assert.Empty(dependencies.RecordedRoleGrants);
+
+        dependencies.RoleAssignment = new RoleAssignmentResult(true, 70);
+        for (var scan = 0; scan < 8 && dependencies.RecordedRoleGrants.Count == 0; scan++)
+        {
+            await app.ApplyAutomaticRoleRulesAsync(CancellationToken.None);
+        }
+
+        Assert.Single(dependencies.RecordedRoleGrants);
+        await app.ApplyAutomaticRoleRulesAsync(CancellationToken.None);
+        Assert.Equal(2, dependencies.RecordedRoleGrants.Count);
+    }
+
     [Fact]
     public async Task Meeting_now_does_not_create_a_session_without_an_available_room()
     {

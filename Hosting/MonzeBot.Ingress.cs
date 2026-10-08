@@ -177,6 +177,24 @@ public sealed partial class MonzeBot
         }
     }
 
+    private bool IsCommandText(string? contentJson)
+    {
+        if (string.IsNullOrWhiteSpace(contentJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            var text = Mezon.Net.Client.MessageContent.Parse(contentJson).Text;
+            return text is not null && text.TrimStart().StartsWith(_commandOptions.Prefix, StringComparison.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     private async Task DrainPendingMessageGapsAsync(CancellationToken cancellationToken)
     {
         var pending = new MessageGapBatch(256);
@@ -206,13 +224,14 @@ public sealed partial class MonzeBot
         ChannelMessageEventData evt,
         CancellationToken cancellationToken)
     {
-        if (_messages is null)
+        var message = (ChannelMessageResponse)evt;
+        if (message.ClanId == 0 && IsCommandText(message.Content))
         {
-            return;
+            // The SDK drops commands outside a clan before any handler runs (CAND-26).
+            _logger.LogInformation("A Monze command sent in a direct message was ignored; commands work in clan channels.");
         }
 
-        var message = (ChannelMessageResponse)evt;
-        if (message.ClanId == 0 || message.ChannelId == 0)
+        if (_messages is null || message.ClanId == 0 || message.ChannelId == 0)
         {
             return;
         }

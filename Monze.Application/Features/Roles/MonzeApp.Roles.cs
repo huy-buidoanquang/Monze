@@ -8,7 +8,15 @@ namespace Monze.Application;
 public sealed partial class MonzeApp
 {
     private const int DefaultTenureDays = 30;
+    private const int FailedGrantLimit = 10_000;
+    private const int MaxSkippedScans = 64;
     private readonly ConcurrentDictionary<long, SemaphoreSlim> _roleRuleGates = new();
+
+    // Scan grants that failed (no permission, role gone): the scans still to skip
+    // and the failures so far. The next scan retries after a first failure, then
+    // 1, 3, 7 ... (at most 64) scans are skipped, so a role the bot cannot grant
+    // is not requested for every member on every scan (CAND-24).
+    private readonly Dictionary<(long ClanId, long RoleId, long UserId), (int Failures, int SkipScans)> _failedGrants = new();
 
     private async Task<CommandOutcome> RoleAsync(
         long clanId,
@@ -152,6 +160,15 @@ public sealed partial class MonzeApp
             return;
         }
 
+        lock (_failedGrants)
+        {
+            foreach (var key in _failedGrants.Keys.ToList())
+            {
+                var (failures, skip) = _failedGrants[key];
+                _failedGrants[key] = (failures, Math.Max(0, skip - 1));
+            }
+        }
+
         var rules = await _roles.ListEnabledRoleRulesAsync(cancellationToken);
         if (rules.Count == 0)
         {
@@ -230,7 +247,18 @@ public sealed partial class MonzeApp
                 continue;
             }
 
+            var grant = (clanId, rule.RoleId, member.UserId);
+            if (!onJoinOnly && IsGrantBackingOff(grant))
+            {
+                continue;
+            }
+
             var result = await gateway.AddUserToRoleAsync(clanId, rule.RoleId, member.UserId, cancellationToken);
+            if (!onJoinOnly)
+            {
+                RecordGrantOutcome(grant, result.Succeeded);
+            }
+
             if (!result.Succeeded)
             {
                 continue;
@@ -239,6 +267,35 @@ public sealed partial class MonzeApp
             assignedRoleIds ??= new HashSet<long>();
             assignedRoleIds.Add(rule.RoleId);
             await _roles.RecordRoleGrantAsync(clanId, rule.RoleId, member.UserId, cancellationToken);
+        }
+    }
+
+    private bool IsGrantBackingOff((long ClanId, long RoleId, long UserId) grant)
+    {
+        lock (_failedGrants)
+        {
+            return _failedGrants.TryGetValue(grant, out var state) && state.SkipScans > 0;
+        }
+    }
+
+    private void RecordGrantOutcome((long ClanId, long RoleId, long UserId) grant, bool succeeded)
+    {
+        lock (_failedGrants)
+        {
+            if (succeeded)
+            {
+                _failedGrants.Remove(grant);
+                return;
+            }
+
+            var failures = _failedGrants.TryGetValue(grant, out var state) ? state.Failures + 1 : 1;
+            if (failures == 1 && _failedGrants.Count >= FailedGrantLimit)
+            {
+                return;
+            }
+
+            // Counted down at the start of each scan: 1 retries on the next scan.
+            _failedGrants[grant] = (failures, Math.Min(1 << Math.Min(failures - 1, 30), MaxSkippedScans + 1));
         }
     }
 

@@ -17,6 +17,9 @@ namespace Monze.Hosting;
 /// </summary>
 internal static class MonzeHostComposition
 {
+    /// <summary>The policy cache's entry bound (each entry has Size = 1).</summary>
+    internal const long PolicyCacheEntryLimit = 100_000;
+
     public static bool IsMigrateOnly(string[] args)
         => args.Any(arg => arg.Equals("migrate", StringComparison.OrdinalIgnoreCase));
 
@@ -145,7 +148,10 @@ internal static class MonzeHostComposition
             sp.GetRequiredService<MonzeCommandOptions>(),
             sp.GetRequiredService<AiExecutionOptions>(),
             sp.GetRequiredService<TimeProvider>()));
-        builder.Services.AddMemoryCache(cache => cache.SizeLimit = 64 * 1024 * 1024);
+        // MonzeBot's policy entries each declare Size = 1, so the limit counts
+        // entries: 100,000 small entries (a few hundred bytes each) keep the
+        // cache within the documented 64 MiB (DEF-05: 64 Mi entries were allowed).
+        builder.Services.AddMemoryCache(cache => cache.SizeLimit = PolicyCacheEntryLimit);
         var aiBase = builder.Configuration["Monze:Ai:BaseUrl"];
         var aiKey = builder.Configuration["Monze:Ai:ApiKey"];
         if (!string.IsNullOrWhiteSpace(aiBase) && !string.IsNullOrWhiteSpace(aiKey))

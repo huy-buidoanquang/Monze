@@ -34,6 +34,9 @@ public sealed class CommandRoutingAreaTests
         await host.Recorder.WaitForAsync(static action => action.Operation == SimOperations.ListChannelDetail && action.ChannelId == DirectId, E2EOracles.Timeout, mark.Sequence);
         await Task.Delay(300);
 
+        // Regression for CAND-26: the ignored direct command is at least logged.
+        await E2EActions.WaitForLogsAsync(host, static entry => entry.Message.StartsWith("A Monze command sent in a direct message was ignored", StringComparison.Ordinal), 1);
+
         await E2EOracles.AssertAsync(host, mark, new ScenarioExpectation
         {
             Inputs = ScenarioExpectation.Of(

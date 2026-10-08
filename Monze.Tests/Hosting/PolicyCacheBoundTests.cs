@@ -19,9 +19,9 @@ public sealed class PolicyCacheBoundTests : IDisposable
     public void Dispose() => Directory.Delete(_contentRoot, recursive: true);
 
     /// <summary>
-    /// The host gives IMemoryCache SizeLimit = 64 MiB, but every entry MonzeBot
-    /// stores declares Size = 1, so the limit counts entries (67,108,864 of
-    /// them) instead of bounding memory to 64 MiB (DEF-05).
+    /// Regression for DEF-05: every entry MonzeBot stores declares Size = 1,
+    /// so SizeLimit counts entries; it used to be 64 Mi (67,108,864) entries
+    /// instead of a bound that keeps the cache near its intended 64 MiB.
     /// </summary>
     [Fact]
     [Req("REQ-CACHE-001", "REQ-PERF-001")]
@@ -41,9 +41,9 @@ public sealed class PolicyCacheBoundTests : IDisposable
         using var provider = builder.Services.BuildServiceProvider();
         var limit = provider.GetRequiredService<IOptions<MemoryCacheOptions>>().Value.SizeLimit;
 
-        KnownDefect.ExpectFailure("DEF-05", () =>
-            Assert.True(
-                limit is { } entries && entries * MinimumEntryBytes <= IntendedBytes,
-                $"SizeLimit {limit} counts entries of Size = 1; at {MinimumEntryBytes} B each that allows {limit * MinimumEntryBytes / (1024 * 1024)} MiB"));
+        Assert.True(
+            limit is { } entries && entries * MinimumEntryBytes <= IntendedBytes,
+            $"SizeLimit {limit} counts entries of Size = 1; at {MinimumEntryBytes} B each that allows {limit * MinimumEntryBytes / (1024 * 1024)} MiB");
+        Assert.Equal(MonzeHostComposition.PolicyCacheEntryLimit, limit);
     }
 }
