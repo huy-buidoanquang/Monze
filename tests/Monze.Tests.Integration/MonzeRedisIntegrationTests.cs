@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Monze.Tests;
 
+[Collection(Monze.Tests.Repositories.RedisCollection.Name)]
 public sealed class MonzeRedisIntegrationTests
 {
     [RedisFact]

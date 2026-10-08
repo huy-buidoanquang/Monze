@@ -49,6 +49,21 @@ public sealed class CampaignDatabase : IAsyncDisposable
         return database;
     }
 
+    /// <summary>Creates a named database from a template under the same gate as <see cref="CloneAsync"/>.</summary>
+    public static async Task CreateNamedFromTemplateAsync(string server, string template, string name)
+    {
+        await CloneGate.WaitAsync();
+        try
+        {
+            await ExecuteAsync(server, $"DROP DATABASE IF EXISTS {Quote(name)} WITH (FORCE);");
+            await ExecuteAsync(server, $"CREATE DATABASE {Quote(name)} TEMPLATE {Quote(template)};");
+        }
+        finally
+        {
+            CloneGate.Release();
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         NpgsqlConnection.ClearAllPools();
