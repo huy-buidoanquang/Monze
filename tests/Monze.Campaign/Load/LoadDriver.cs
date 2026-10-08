@@ -182,6 +182,14 @@ public sealed class LoadDriver
                 nonces[i] = LoadStage.OutboxNoncePrefix + (++sequence).ToString(CultureInfo.InvariantCulture);
             }
 
+            // Register before the insert: Monze may send a row before the insert call returns.
+            var measured = nextBatch >= measureStart;
+            var registered = Stopwatch.GetTimestamp();
+            foreach (var nonce in nonces)
+            {
+                tracker.OutboxRowInserted(nonce, registered, measured);
+            }
+
             try
             {
                 await using var command = dataSource.CreateCommand("""
@@ -193,15 +201,17 @@ public sealed class LoadDriver
                 command.Parameters.AddWithValue("channels", channels);
                 command.Parameters.AddWithValue("nonces", nonces);
                 await command.ExecuteNonQueryAsync(cancellationToken);
-                var committed = Stopwatch.GetTimestamp();
-                foreach (var nonce in nonces)
-                {
-                    tracker.OutboxRowInserted(nonce, committed, nextBatch >= measureStart);
-                }
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {
+                tracker.OutboxRowsAbandoned(nonces);
                 errors.Add(error);
+            }
+            catch (OperationCanceledException)
+            {
+                // Stopping: the row may or may not exist, so it is not tracked.
+                tracker.OutboxRowsAbandoned(nonces);
+                return;
             }
 
             nextBatch += Stopwatch.Frequency / 10;

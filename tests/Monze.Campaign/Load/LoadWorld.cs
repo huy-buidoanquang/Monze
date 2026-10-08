@@ -34,14 +34,19 @@ public sealed class LoadWorld
 
     public long BotId => World.Bot.Id;
 
-    public static LoadWorld Create(int registered)
+    /// <summary>
+    /// <paramref name="active"/> overrides how many of the registered clans
+    /// the bot is a member of (default: up to <see cref="MaxActiveClans"/>);
+    /// capacity scenarios use it for the discovery boundary.
+    /// </summary>
+    public static LoadWorld Create(int registered, int? active = null)
     {
-        var active = Math.Min(registered, MaxActiveClans);
-        var commandChannels = Math.Max(2, (int)Math.Ceiling(40.0 / active));
+        var activeCount = Math.Min(registered, active ?? MaxActiveClans);
+        var commandChannels = Math.Max(2, (int)Math.Ceiling(40.0 / activeCount));
         var world = new SimWorld().WithBot(Base + 1, "monze-load", "simulated-load-token-not-a-secret", "Monze");
-        var clans = new List<LoadClan>(active);
+        var clans = new List<LoadClan>(activeCount);
         var nextUser = Base + 10_000;
-        for (var c = 0; c < active; c++)
+        for (var c = 0; c < activeCount; c++)
         {
             var clanId = Base + 1_000_000 + c;
             var channelBase = Base + 2_000_000 + c * 100L;

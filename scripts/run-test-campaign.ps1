@@ -49,12 +49,13 @@ Set-Location $repo
 $profileName = if ($Full -and $Soak) { 'full-soak' } elseif ($Full) { 'full' } elseif ($Deep) { 'deep' } elseif ($Soak) { 'soak' } else { 'quick' }
 $allTiers = @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'component', 'load', 'k6', 'capacity', 'chaos', 'soak', 'live')
 # Tiers whose runners exist in this revision. Later commits add to this list.
-$implemented = @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'component', 'load', 'k6')
+$implemented = @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'component', 'load', 'k6', 'capacity', 'chaos', 'soak')
 $profileTiers = switch ($profileName) {
     'quick' { @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'component', 'load', 'capacity', 'chaos') }
     'deep' { @('build', 'inventory', 'unit', 'property', 'integration', 'e2e') }
     'soak' { @('build', 'soak') }
-    default { @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'component', 'load', 'k6', 'capacity', 'chaos') + $(if ($Soak) { @('soak') } else { @() }) }
+    # Full always runs a short soak (not G4 evidence); -Soak makes it $SoakMinutes long.
+    default { @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'component', 'load', 'k6', 'capacity', 'chaos', 'soak') }
 }
 if ($Live) { $profileTiers += 'live' }
 if ($Tiers) { $profileTiers = @('build') + @($Tiers | Where-Object { $_ -ne 'build' }) }
@@ -168,7 +169,8 @@ function Invoke-RunnerTier {
     # Monze.Campaign scenarios (component, load) run one after another on an
     # otherwise idle machine and write one monze.artifact.v1 file each to raw/<tier>/.
     $arguments = @((Join-Path $repo 'tests/Monze.Campaign/bin/Release/net10.0/Monze.Campaign.dll'), $Tier, '--artifacts', $raw)
-    if ($profileName -ne 'quick') { $arguments += '--full' }
+    if ($Tier -eq 'soak') { $arguments += @('--minutes', $(if ($Soak) { "$SoakMinutes" } else { '10' })) }
+    elseif ($profileName -ne 'quick') { $arguments += '--full' }
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $run = Invoke-Logged -Name $Tier -File 'dotnet' -Arguments $arguments -TimeoutMinutes $TimeoutMinutes
     $watch.Stop()
@@ -308,7 +310,7 @@ try {
     Add-Tier 'preflight' 'PASS' $watch.Elapsed.TotalSeconds 0 $null (($preflightNotes + @("branch $branch")) -join '; ')
 
     # ------------------------------------------------------------ containers (start while building)
-    $needsDb = @($requested | Where-Object { $_ -in 'integration', 'e2e', 'component', 'load', 'k6' }).Count -gt 0
+    $needsDb = @($requested | Where-Object { $_ -in 'integration', 'e2e', 'component', 'load', 'k6', 'capacity', 'soak' }).Count -gt 0
     if ($needsDb) {
         $null = Start-CampaignPostgres 'pg17' 'postgres:17-alpine' 55432 $secrets.postgres 'monze_t_integration'
         $null = Start-CampaignPostgres 'pg16' 'postgres:16' 55433 $secrets.postgres 'monze_t_integration'
@@ -403,6 +405,30 @@ try {
                 finally {
                     Remove-Item Env:MONZE_TEST_POSTGRES -ErrorAction SilentlyContinue
                 }
+            }
+            'capacity' {
+                $env:MONZE_TEST_POSTGRES = "Host=127.0.0.1;Port=55432;Database=monze_t_integration;Username=monze;Password=$($secrets.postgres)"
+                try {
+                    $result = Invoke-RunnerTier -Tier 'capacity' -TimeoutMinutes $(if ($profileName -eq 'quick') { 20 } else { 60 })
+                }
+                finally {
+                    Remove-Item Env:MONZE_TEST_POSTGRES -ErrorAction SilentlyContinue
+                }
+            }
+            'soak' {
+                $env:MONZE_TEST_POSTGRES = "Host=127.0.0.1;Port=55432;Database=monze_t_integration;Username=monze;Password=$($secrets.postgres)"
+                try {
+                    $result = Invoke-RunnerTier -Tier 'soak' -TimeoutMinutes $(if ($Soak) { $SoakMinutes + 30 } else { 25 })
+                }
+                finally {
+                    Remove-Item Env:MONZE_TEST_POSTGRES -ErrorAction SilentlyContinue
+                }
+            }
+            'chaos' {
+                # Chaos starts and removes its own labelled PostgreSQL and Redis
+                # containers (it kills and pauses them), so it never touches the
+                # shared campaign servers.
+                $result = Invoke-RunnerTier -Tier 'chaos' -TimeoutMinutes $(if ($profileName -eq 'quick') { 30 } else { 120 })
             }
             'k6' {
                 # The runner finds k6 on PATH or in its default install folder; without it the tier is BLOCKED.

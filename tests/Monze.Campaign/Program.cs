@@ -1,5 +1,8 @@
+using Monze.Campaign.Capacity;
+using Monze.Campaign.Chaos;
 using Monze.Campaign.Component;
 using Monze.Campaign.Load;
+using Monze.Campaign.Soak;
 using Monze.Testing;
 
 namespace Monze.Campaign;
@@ -7,7 +10,11 @@ namespace Monze.Campaign;
 /// <summary>
 /// The campaign performance runner. `component` measures the database,
 /// Redis and SQLite paths in isolation; `load` drives the whole Monze host on
-/// the offline simulator; `k6` cross-checks the load harness with k6. They run on the guarded campaign containers
+/// the offline simulator; `k6` cross-checks the load harness with k6;
+/// `chaos` breaks PostgreSQL, Redis, Mezon, clocks and events under
+/// background load (on its own labelled containers); `capacity` pushes the
+/// queues, the outbox and discovery to their bounds; `soak` runs the
+/// workload for a long time and analyses leaks. They run on the guarded campaign containers
 /// (MONZE_TEST_POSTGRES, MONZE_TEST_POSTGRES_ALT, MONZE_REDIS_CONNECTION) and
 /// write monze.artifact.v1 results to the campaign raw/ folder.
 /// </summary>
@@ -15,11 +22,14 @@ public static class Program
 {
     public static async Task<int> Main(string[] args)
     {
-        if (args.Length == 0 || args[0] is not ("component" or "load" or "k6"))
+        if (args.Length == 0 || args[0] is not ("component" or "load" or "k6" or "chaos" or "capacity" or "soak"))
         {
             Console.Error.WriteLine("Usage: Monze.Campaign component [--full] [--only C-ID,...] [--artifacts <raw dir>]");
             Console.Error.WriteLine("       Monze.Campaign load [--full] [--variants V1,V3,V3L] [--stages 1,10,100,1000] [--artifacts <raw dir>]");
             Console.Error.WriteLine("       Monze.Campaign k6 [--full] [--k6 <path>] [--artifacts <raw dir>]");
+            Console.Error.WriteLine("       Monze.Campaign chaos [--full] [--only PG-01,...] [--artifacts <raw dir>]");
+            Console.Error.WriteLine("       Monze.Campaign capacity [--full] [--only BP-1,...] [--artifacts <raw dir>]");
+            Console.Error.WriteLine("       Monze.Campaign soak [--minutes N] [--artifacts <raw dir>]");
             return 3;
         }
 
@@ -29,6 +39,7 @@ public static class Program
         List<LoadVariant>? variants = null;
         List<int>? stages = null;
         string? k6 = null;
+        var minutes = 10;
         for (var i = 1; i < args.Length; i++)
         {
             switch (args[i])
@@ -68,6 +79,14 @@ public static class Program
                     }
 
                     break;
+                case "--minutes" when i + 1 < args.Length:
+                    if (!int.TryParse(args[++i], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out minutes) || minutes < 1)
+                    {
+                        Console.Error.WriteLine("Invalid --minutes.");
+                        return 3;
+                    }
+
+                    break;
                 case "--k6" when i + 1 < args.Length:
                     k6 = args[++i];
                     break;
@@ -86,7 +105,13 @@ public static class Program
             return 3;
         }
 
-        var unknown = only?.Except(ComponentRunner.Scenarios.Select(static scenario => scenario.Id)).ToList();
+        var known = args[0] switch
+        {
+            "chaos" => ChaosScenarios.All.Select(static scenario => scenario.Id),
+            "capacity" => CapacityScenarios.All.Select(static scenario => scenario.Id),
+            _ => ComponentRunner.Scenarios.Select(static scenario => scenario.Id)
+        };
+        var unknown = only?.Except(known).ToList();
         if (unknown is { Count: > 0 })
         {
             Console.Error.WriteLine($"Unknown scenario {string.Join(", ", unknown)}.");
@@ -94,6 +119,11 @@ public static class Program
         }
 
         var seed = int.TryParse(CampaignEnvironment.Seed, out var parsed) ? parsed : 1;
+        if (args[0] == "chaos")
+        {
+            return await ChaosRunner.RunAsync(CampaignEnvironment.Id, seed, full, artifacts, only);
+        }
+
         var context = new ComponentContext(
             TestPostgres.ConnectionString,
             TestPostgres.IsAlternateConfigured ? TestPostgres.AlternateConnectionString : null,
@@ -104,6 +134,10 @@ public static class Program
         {
             case "load":
                 return await LoadRunner.RunAsync(context, artifacts, variants, stages);
+            case "capacity":
+                return await CapacityRunner.RunAsync(context, artifacts, only);
+            case "soak":
+                return await SoakRunner.RunAsync(context, artifacts, minutes);
             case "k6":
                 var watch = System.Diagnostics.Stopwatch.StartNew();
                 CampaignArtifact crossCheck;

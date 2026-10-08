@@ -13,7 +13,9 @@ namespace Monze.Campaign.Load;
 /// channel answers it; the channel is free again 300 ms after its last
 /// output (or after 10 s without an answer, which counts as lost). Clicks are
 /// matched by the edited message, welcomes by the joined user's id in the
-/// welcome channel, outbox rows by their nonce. Latencies are measured from
+/// welcome channel, outbox rows by their nonce (every nonce is registered
+/// before its row exists and forgotten once seen, so an unknown nonce is a
+/// duplicate and long runs keep constant memory). Latencies are measured from
 /// the scheduled time (so a stalled generator cannot hide queueing) and only
 /// for events scheduled inside the measure window.
 /// </summary>
@@ -108,7 +110,7 @@ public sealed class LoadTracker
     public (long Clicks, long Joins, long Outbox) Unanswered()
         => (_clicks.Values.Count(static pending => pending.Measured),
             _joins.Values.Count(static pending => pending.Measured),
-            _outbox.Values.Count(static pending => pending.Measured && !pending.Seen));
+            _outbox.Values.Count(static pending => pending.Measured));
 
     public bool TryTakeCommandChannel(out (long Clan, long Channel) slot, bool measured)
     {
@@ -180,6 +182,15 @@ public sealed class LoadTracker
         if (measured)
         {
             Interlocked.Increment(ref _outboxInserted);
+        }
+    }
+
+    /// <summary>Forgets nonces whose insert failed, so they do not count as undelivered.</summary>
+    public void OutboxRowsAbandoned(IEnumerable<string> nonces)
+    {
+        foreach (var nonce in nonces)
+        {
+            _outbox.TryRemove(nonce, out _);
         }
     }
 
@@ -317,20 +328,10 @@ public sealed class LoadTracker
             end++;
         }
 
-        if (!_outbox.TryGetValue(content[start..end], out var pending))
+        if (!_outbox.TryRemove(content[start..end], out var pending))
         {
+            Interlocked.Increment(ref _outboxDuplicates);
             return;
-        }
-
-        lock (pending)
-        {
-            if (pending.Seen)
-            {
-                Interlocked.Increment(ref _outboxDuplicates);
-                return;
-            }
-
-            pending.Seen = true;
         }
 
         if (pending.Measured)
@@ -347,8 +348,6 @@ public sealed class LoadTracker
         public long DueTicks { get; } = dueTicks;
 
         public bool Measured { get; } = measured;
-
-        public bool Seen { get; set; }
     }
 
     private sealed class PendingCommand(long clan, long channel, long user, string text, long dueTicks, bool measured)
