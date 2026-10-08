@@ -49,7 +49,7 @@ Set-Location $repo
 $profileName = if ($Full -and $Soak) { 'full-soak' } elseif ($Full) { 'full' } elseif ($Deep) { 'deep' } elseif ($Soak) { 'soak' } else { 'quick' }
 $allTiers = @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'component', 'load', 'k6', 'capacity', 'chaos', 'soak', 'live')
 # Tiers whose runners exist in this revision. Later commits add to this list.
-$implemented = @('build', 'inventory', 'unit', 'property', 'integration', 'micro')
+$implemented = @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro')
 $profileTiers = switch ($profileName) {
     'quick' { @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'load', 'capacity', 'chaos') }
     'deep' { @('build', 'inventory', 'unit', 'property', 'integration', 'e2e') }
@@ -282,7 +282,7 @@ try {
     Add-Tier 'preflight' 'PASS' $watch.Elapsed.TotalSeconds 0 $null (($preflightNotes + @("branch $branch")) -join '; ')
 
     # ------------------------------------------------------------ containers (start while building)
-    $needsDb = ($requested -contains 'integration')
+    $needsDb = ($requested -contains 'integration') -or ($requested -contains 'e2e')
     if ($needsDb) {
         $null = Start-CampaignPostgres 'pg17' 'postgres:17-alpine' 55432 $secrets.postgres 'monze_t_integration'
         $null = Start-CampaignPostgres 'pg16' 'postgres:16' 55433 $secrets.postgres 'monze_t_integration'
@@ -347,6 +347,15 @@ try {
                 }
                 finally {
                     Remove-Item Env:MONZE_TEST_POSTGRES, Env:MONZE_TEST_POSTGRES_ALT, Env:MONZE_REDIS_CONNECTION -ErrorAction SilentlyContinue
+                }
+            }
+            'e2e' {
+                $env:MONZE_TEST_POSTGRES = "Host=127.0.0.1;Port=55432;Database=monze_t_integration;Username=monze;Password=$($secrets.postgres)"
+                try {
+                    $result = Invoke-TestTier -Tier 'e2e' -Project 'tests/Monze.Tests.E2E/Monze.Tests.E2E.csproj' -TimeoutMinutes 30 -Strict -Coverage
+                }
+                finally {
+                    Remove-Item Env:MONZE_TEST_POSTGRES -ErrorAction SilentlyContinue
                 }
             }
             'micro' {

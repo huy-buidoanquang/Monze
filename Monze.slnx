@@ -9,4 +9,6 @@
   <Project Path="tests/Monze.Tests.Integration/Monze.Tests.Integration.csproj" />
   <Project Path="tests/Monze.Tests.Property/Monze.Tests.Property.csproj" />
   <Project Path="tests/Monze.TestReport/Monze.TestReport.csproj" />
+  <Project Path="tests/Monze.Simulator/Monze.Simulator.csproj" />
+  <Project Path="tests/Monze.Tests.E2E/Monze.Tests.E2E.csproj" />
 </Solution>
