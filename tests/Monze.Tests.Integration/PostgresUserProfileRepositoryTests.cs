@@ -1,22 +1,15 @@
 using Monze.Infrastructure.Persistence;
 using Npgsql;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
 
 public sealed class PostgresUserProfileRepositoryTests
 {
-    [Fact]
+    [DbFact]
     public async Task Profile_upsert_is_clan_scoped_and_preserves_display_priority()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 

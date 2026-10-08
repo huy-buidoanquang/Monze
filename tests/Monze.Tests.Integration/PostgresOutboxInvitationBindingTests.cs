@@ -1,23 +1,16 @@
 using Monze.Domain;
 using Monze.Infrastructure.Persistence;
 using Npgsql;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
 
 public sealed class PostgresOutboxInvitationBindingTests
 {
-    [Fact]
+    [DbFact]
     public async Task Completing_scheduled_invitation_atomically_unblocks_all_cycle_summaries()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 

@@ -1,22 +1,15 @@
 using Monze.Infrastructure.Persistence;
 using Npgsql;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
 
 public sealed class PostgresMeetingVoiceClaimTests
 {
-    [Fact]
+    [DbFact]
     public async Task Concurrent_voice_claims_keep_one_session_and_cancel_the_loser()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 

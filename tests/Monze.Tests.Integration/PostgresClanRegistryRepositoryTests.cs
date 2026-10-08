@@ -1,20 +1,16 @@
 using Monze.Domain;
 using Monze.Infrastructure.Persistence;
 using Npgsql;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
 
 public sealed class PostgresClanRegistryRepositoryTests
 {
-    [Fact]
+    [DbFact]
     public async Task Owner_replacement_clears_delegates_and_invalidates_settings()
     {
-        if (!PostgresTestEnabled())
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 
@@ -49,12 +45,6 @@ public sealed class PostgresClanRegistryRepositoryTests
             await CleanupClanAsync(dataSource, clanId);
         }
     }
-
-    private static bool PostgresTestEnabled()
-        => string.Equals(
-            Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-            "1",
-            StringComparison.Ordinal);
 
     private static async Task SeedClanAsync(NpgsqlDataSource dataSource, long clanId, long ownerId, long adminId)
     {

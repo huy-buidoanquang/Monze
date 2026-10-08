@@ -2,23 +2,16 @@ using Monze.Application;
 using Monze.Domain;
 using Monze.Infrastructure.Persistence;
 using Npgsql;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
 
 public sealed class PostgresScheduledMeetingRepositoryTests
 {
-    [Fact]
+    [DbFact]
     public async Task Scheduled_meeting_commit_is_atomic_and_lease_scoped()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 

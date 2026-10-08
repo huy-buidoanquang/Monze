@@ -2,23 +2,16 @@ using Monze.Application;
 using Monze.Domain;
 using Monze.Infrastructure.Persistence;
 using Npgsql;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
 
 public sealed class PostgresMeetingCycleTests
 {
-    [Fact]
+    [DbFact]
     public async Task Duplicate_started_event_for_same_room_reuses_the_existing_session()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
         var suffix = Random.Shared.NextInt64(1, 1_000_000);
@@ -66,17 +59,9 @@ public sealed class PostgresMeetingCycleTests
         }
     }
 
-    [Fact]
+    [DbFact]
     public async Task Ended_before_started_is_applied_when_the_session_is_bound()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
         var suffix = Random.Shared.NextInt64(1, 1_000_000);
@@ -128,17 +113,9 @@ public sealed class PostgresMeetingCycleTests
         }
     }
 
-    [Fact]
+    [DbFact]
     public async Task Duplicate_ended_events_store_one_pending_transition()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
         var roomId = $"monze-duplicate-ended:{Guid.NewGuid():N}";
@@ -169,17 +146,9 @@ public sealed class PostgresMeetingCycleTests
         }
     }
 
-    [Fact]
+    [DbFact]
     public async Task Summary_ready_before_started_is_applied_when_the_session_is_bound()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
         var suffix = Random.Shared.NextInt64(1, 1_000_000);
@@ -226,17 +195,9 @@ public sealed class PostgresMeetingCycleTests
         }
     }
 
-    [Fact]
+    [DbFact]
     public async Task Concurrent_started_and_ended_events_converge_to_summary_pending()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
         var suffix = Random.Shared.NextInt64(1, 1_000_000);
@@ -285,17 +246,9 @@ public sealed class PostgresMeetingCycleTests
         }
     }
 
-    [Fact]
+    [DbFact]
     public async Task Late_ended_event_records_time_without_reverting_a_posted_summary()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
         var suffix = Random.Shared.NextInt64(1, 1_000_000);
@@ -349,17 +302,9 @@ public sealed class PostgresMeetingCycleTests
         }
     }
 
-    [Fact]
+    [DbFact]
     public async Task Repeated_agent_cycles_keep_one_invitation_and_create_distinct_summaries()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 

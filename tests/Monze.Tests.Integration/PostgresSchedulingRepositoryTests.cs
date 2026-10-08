@@ -1,44 +1,38 @@
 using Monze.Domain;
 using Monze.Infrastructure.Persistence;
 using Npgsql;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
 
 public sealed class PostgresSchedulingRepositoryTests
 {
-    [Fact]
+    [DbFact]
     public async Task Schedule_list_and_cancel_are_scoped_to_clan_channel_and_requester()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 
-        const long clanId = 2104288434238525440L;
-        const long channelId = 2104288438869037056L;
+        // A synthetic clan keeps the test independent of any real clan data.
+        var clanId = -Random.Shared.NextInt64(1, long.MaxValue / 2);
+        var channelId = clanId - 1;
+        var ownerId = Random.Shared.NextInt64(1, long.MaxValue);
         var requesterId = -Random.Shared.NextInt64(1, long.MaxValue);
         var otherUserId = requesterId == long.MinValue ? long.MinValue + 1 : requesterId - 1;
 
         await using var dataSource = NpgsqlDataSource.Create(connectionString!);
         var repository = new PostgresSchedulingRepository(dataSource);
-        long ownerId;
-        await using (var ownerConnection = await dataSource.OpenConnectionAsync())
-        await using (var ownerCommand = new NpgsqlCommand(
-            "SELECT owner_id FROM clan_registry WHERE clan_id = @clan AND inactive_reason IS NULL;",
-            ownerConnection))
+        await using (var seedConnection = await dataSource.OpenConnectionAsync())
+        await using (var seedCommand = new NpgsqlCommand(
+            "INSERT INTO clan_registry(clan_id, owner_id) VALUES (@clan, @owner);",
+            seedConnection))
         {
-            ownerCommand.Parameters.AddWithValue("clan", clanId);
-            ownerId = (long)(await ownerCommand.ExecuteScalarAsync() ?? 0L);
+            seedCommand.Parameters.AddWithValue("clan", clanId);
+            seedCommand.Parameters.AddWithValue("owner", ownerId);
+            await seedCommand.ExecuteNonQueryAsync();
         }
 
-        Assert.True(ownerId > 0);
         var scheduleId = await repository.CreateMeetingScheduleAsync(
             clanId,
             channelId,
@@ -103,9 +97,10 @@ public sealed class PostgresSchedulingRepositoryTests
         {
             await using var connection = await dataSource.OpenConnectionAsync();
             await using var command = new NpgsqlCommand(
-                "DELETE FROM meeting_schedule WHERE id = @id;",
+                "DELETE FROM meeting_schedule WHERE id = @id; DELETE FROM clan_registry WHERE clan_id = @clan;",
                 connection);
             command.Parameters.AddWithValue("id", scheduleId);
+            command.Parameters.AddWithValue("clan", clanId);
             await command.ExecuteNonQueryAsync();
         }
     }

@@ -1,23 +1,16 @@
 using Monze.Application;
 using Monze.Infrastructure.Persistence;
 using Npgsql;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
 
 public sealed class PostgresMeetingSummaryDeliveryTests
 {
-    [Fact]
+    [DbFact]
     public async Task Summary_waits_for_the_invitation_ack_and_then_uses_it_as_the_reply_target()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 
@@ -108,17 +101,9 @@ public sealed class PostgresMeetingSummaryDeliveryTests
         }
     }
 
-    [Fact]
+    [DbFact]
     public async Task Agent_summary_persists_full_transcript_and_orders_two_outbox_messages()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 

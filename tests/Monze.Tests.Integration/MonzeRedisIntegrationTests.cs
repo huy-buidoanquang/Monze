@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Monze.Application;
 using Monze.Infrastructure.Caching;
+using Monze.Testing;
 using StackExchange.Redis;
 using Xunit;
 
@@ -8,14 +9,10 @@ namespace Monze.Tests;
 
 public sealed class MonzeRedisIntegrationTests
 {
-    [Fact]
+    [RedisFact]
     public async Task Two_instances_preserve_invalidation_tombstone_and_stale_writer_safety()
     {
-        var connectionString = Environment.GetEnvironmentVariable("MONZE_REDIS_CONNECTION");
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            return;
-        }
+        var connectionString = TestRedis.ConnectionString;
 
         var options = ConfigurationOptions.Parse(connectionString);
         options.AbortOnConnectFail = false;

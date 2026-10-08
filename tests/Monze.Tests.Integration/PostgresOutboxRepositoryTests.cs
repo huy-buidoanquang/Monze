@@ -2,23 +2,16 @@ using Monze.Domain;
 using Monze.Infrastructure.Persistence;
 using Npgsql;
 using NpgsqlTypes;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
 
 public sealed class PostgresOutboxRepositoryTests
 {
-    [Fact]
+    [DbFact]
     public async Task Outbox_claim_completion_reclaim_and_uncertain_are_lease_scoped()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 

@@ -1,20 +1,16 @@
 using Monze.Application;
 using Monze.Infrastructure.Persistence;
 using Npgsql;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
 
 public sealed class PostgresWelcomeRepositoryTests
 {
-    [Fact]
+    [DbFact]
     public async Task Welcome_configuration_and_delivery_claim_are_durable_and_clan_scoped()
     {
-        if (!PostgresTestEnabled())
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 
@@ -62,12 +58,6 @@ public sealed class PostgresWelcomeRepositoryTests
             await CleanupClanAsync(dataSource, clanId);
         }
     }
-
-    private static bool PostgresTestEnabled()
-        => string.Equals(
-            Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-            "1",
-            StringComparison.Ordinal);
 
     private static async Task SeedClanAsync(NpgsqlDataSource dataSource, long clanId, long ownerId, long adminId)
     {

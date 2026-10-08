@@ -1,19 +1,15 @@
 using Monze.Infrastructure.Persistence;
 using Npgsql;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
 
 public sealed class PostgresMessageHistoryRepositoryTests
 {
-    [Fact]
+    [DbFact]
     public async Task Message_watermark_is_monotonic_and_gap_state_is_sticky()
     {
-        if (!PostgresTestEnabled())
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 
@@ -65,12 +61,6 @@ public sealed class PostgresMessageHistoryRepositoryTests
             await cleanup.ExecuteNonQueryAsync();
         }
     }
-
-    private static bool PostgresTestEnabled()
-        => string.Equals(
-            Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-            "1",
-            StringComparison.Ordinal);
 
     private static async Task SeedClanAsync(NpgsqlDataSource dataSource, long clanId, long channelId)
     {

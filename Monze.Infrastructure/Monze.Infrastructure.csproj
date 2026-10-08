@@ -21,5 +21,11 @@
     <EmbeddedResource Include="Persistence\Migrations\*.sql" />
     <InternalsVisibleTo Include="Monze.Tests" />
     <InternalsVisibleTo Include="Monze.Benchmarks" />
+    <InternalsVisibleTo Include="Monze.Testing" />
+    <InternalsVisibleTo Include="Monze.Tests.Property" />
+    <InternalsVisibleTo Include="Monze.Tests.Integration" />
+    <InternalsVisibleTo Include="Monze.Tests.E2E" />
+    <InternalsVisibleTo Include="Monze.Tests.Resilience" />
+    <InternalsVisibleTo Include="Monze.Campaign" />
   </ItemGroup>
 </Project>

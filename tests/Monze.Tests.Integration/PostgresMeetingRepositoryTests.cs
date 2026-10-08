@@ -1,23 +1,16 @@
 using Monze.Infrastructure.Persistence;
 using Monze.Application.Commands;
 using Npgsql;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
 
 public sealed class PostgresMeetingRepositoryTests
 {
-    [Fact]
+    [DbFact]
     public async Task Direct_agent_binding_creates_voice_chat_session_and_posts_summary_to_that_channel()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 
@@ -90,17 +83,9 @@ public sealed class PostgresMeetingRepositoryTests
         }
     }
 
-    [Fact]
+    [DbFact]
     public async Task Store_summary_uses_text_channel_and_drops_cross_channel_reply()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 
@@ -179,17 +164,9 @@ public sealed class PostgresMeetingRepositoryTests
         }
     }
 
-    [Fact]
+    [DbFact]
     public async Task Store_summary_falls_back_to_the_meeting_text_channel()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 
@@ -257,17 +234,9 @@ public sealed class PostgresMeetingRepositoryTests
         }
     }
 
-    [Fact]
+    [DbFact]
     public async Task Summary_retry_exhaustion_is_terminal_and_enqueues_one_failure_notice()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 
@@ -371,17 +340,9 @@ public sealed class PostgresMeetingRepositoryTests
         }
     }
 
-    [Fact]
+    [DbFact]
     public async Task Pending_summary_claims_are_distinct_across_four_concurrent_lanes()
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-                "1",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 

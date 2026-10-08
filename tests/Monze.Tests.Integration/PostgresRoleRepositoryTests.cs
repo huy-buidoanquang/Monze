@@ -1,20 +1,16 @@
 using Monze.Domain;
 using Monze.Infrastructure.Persistence;
 using Npgsql;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
 
 public sealed class PostgresRoleRepositoryTests
 {
-    [Fact]
+    [DbFact]
     public async Task Role_rules_honor_enabled_state_and_concurrent_grants_are_idempotent()
     {
-        if (!PostgresTestEnabled())
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 
@@ -70,12 +66,6 @@ public sealed class PostgresRoleRepositoryTests
             await CleanupClanAsync(dataSource, clanId);
         }
     }
-
-    private static bool PostgresTestEnabled()
-        => string.Equals(
-            Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-            "1",
-            StringComparison.Ordinal);
 
     private static async Task SeedClanAsync(NpgsqlDataSource dataSource, long clanId, long ownerId)
     {

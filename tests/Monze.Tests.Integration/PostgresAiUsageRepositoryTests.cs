@@ -1,19 +1,15 @@
 using Monze.Infrastructure.Persistence;
 using Npgsql;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
 
 public sealed class PostgresAiUsageRepositoryTests
 {
-    [Fact]
+    [DbFact]
     public async Task Concurrent_budget_consumption_never_exceeds_the_daily_cap()
     {
-        if (!PostgresTestEnabled())
-        {
-            return;
-        }
-
         var connectionString = PostgresTestConfiguration.ReadConnectionString();
         Assert.False(string.IsNullOrWhiteSpace(connectionString));
 
@@ -66,10 +62,4 @@ public sealed class PostgresAiUsageRepositoryTests
             await cleanup.ExecuteNonQueryAsync();
         }
     }
-
-    private static bool PostgresTestEnabled()
-        => string.Equals(
-            Environment.GetEnvironmentVariable("MONZE_RUN_DB_TESTS"),
-            "1",
-            StringComparison.Ordinal);
 }
