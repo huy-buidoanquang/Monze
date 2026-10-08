@@ -28,7 +28,7 @@ public sealed partial class MonzeBot
         _logger.LogInformation(
             "Welcome join event received and queued. IsBot={IsBot}.",
             item.IsBot);
-        if (_welcomeIngress.Writer.TryWrite(item))
+        if (_welcomeIngress.TryWrite(item.ClanId, item))
         {
             Interlocked.Increment(ref _welcomeIngressDepth);
             return Task.CompletedTask;
@@ -42,7 +42,7 @@ public sealed partial class MonzeBot
         Interlocked.Increment(ref _welcomePendingWriters);
         try
         {
-            await _welcomeIngress.Writer.WriteAsync(item);
+            await _welcomeIngress.WriteAsync(item.ClanId, item);
             Interlocked.Increment(ref _welcomeIngressDepth);
         }
         catch (ChannelClosedException)
@@ -53,15 +53,41 @@ public sealed partial class MonzeBot
             Interlocked.Decrement(ref _welcomePendingWriters);
         }
     }
-    private async Task ConsumeWelcomeAsync(
+    private const int WelcomePartitions = 8;
+
+    /// <summary>One consumer per welcome lane; joins of one clan stay in order.</summary>
+    private Task ConsumeWelcomeAsync(
         MezonClient client,
         CancellationToken cancellationToken)
     {
-        await foreach (var item in _welcomeIngress.Reader.ReadAllAsync(cancellationToken))
+        var workers = new Task[_welcomeIngress.PartitionCount];
+        for (var i = 0; i < workers.Length; i++)
+        {
+            workers[i] = ConsumeWelcomePartitionAsync(client, _welcomeIngress.GetReader(i), cancellationToken);
+        }
+
+        return Task.WhenAll(workers);
+    }
+
+    private async Task ConsumeWelcomePartitionAsync(
+        MezonClient client,
+        ChannelReader<WelcomeIngressItem> reader,
+        CancellationToken cancellationToken)
+    {
+        await foreach (var item in reader.ReadAllAsync(cancellationToken))
         {
             Interlocked.Decrement(ref _welcomeIngressDepth);
             try
             {
+                if (item.ClanId != 0 && item.UserId == client.BotId)
+                {
+                    // Monze itself was added to a clan: register it (and its owner) now
+                    // rather than at the next start-up (CAND-25).
+                    _logger.LogInformation("Monze was added to a clan; refreshing the clan registry.");
+                    await RefreshClansAsync(client, cancellationToken);
+                    continue;
+                }
+
                 if (item.IsBot || item.ClanId == 0 || item.UserId == 0)
                 {
                     _logger.LogDebug(
@@ -135,9 +161,16 @@ public sealed partial class MonzeBot
                         targets.Users,
                         targets.Roles,
                         targets.Channels);
-                    await channel.SendAsync(
+                    var ack = await channel.SendAsync(
                         rendered.Content,
                         mentions: rendered.Mentions);
+                    if (TryReadMessageId(ack) <= 0)
+                    {
+                        // SDK 1.6.2 answers a send the platform rejected with an
+                        // empty ack instead of throwing (WF-01).
+                        throw new InvalidOperationException("The platform rejected the welcome message.");
+                    }
+
                     _logger.LogInformation(
                         "Welcome message sent to the resolved public text channel.");
                 }

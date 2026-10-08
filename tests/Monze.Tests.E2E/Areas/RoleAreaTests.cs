@@ -134,6 +134,35 @@ public sealed class RoleAreaTests
             static action => E2EContent.Visible(action).Contains(MonzeMessages.RoleAssignFailed, StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// Regression for CAND-23 (Monze's part): the periodic scan applies a join
+    /// rule to the members it lists, and ListClanUsers carries no bot flag, so
+    /// Monze used to grant the role to itself. It now skips its own account;
+    /// other bots still need the platform's flag (docs/mezon-net-handoff.md).
+    /// </summary>
+    [DbFact]
+    [Req("REQ-ROLE-001")]
+    public async Task The_periodic_scan_never_grants_a_role_to_monze_itself()
+    {
+        await using var host = await E2EActions.StartAsync("role_self");
+        var mark = await E2EOracles.MarkAsync(host);
+        var rule = await E2EActions.CommandAsync(host, GeneralId, OwnerId, "*role join Developer");
+        var on = await E2EActions.CommandAsync(host, GeneralId, OwnerId, "*role on");
+
+        // The scan grants member by member; let it finish before checking that it stays quiet.
+        await host.Recorder.WaitForAsync(static action => action.Kind == SimActionKind.RoleAssignment, E2EOracles.Timeout, mark.Sequence);
+        await host.Recorder.WaitForQuietAsync(TimeSpan.FromSeconds(1.5), E2EOracles.Timeout);
+        await ScanQuietAsync(host);
+        await E2EOracles.AssertAsync(host, mark, ScenarioExpectation.Of((rule, ResponseKind.Reply), (on, ResponseKind.Reply)));
+        var granted = host.Recorder.Since(mark.Sequence)
+            .Where(static action => action.Kind == SimActionKind.RoleAssignment)
+            .SelectMany(static action => action.AddedUserIds)
+            .ToList();
+        Assert.NotEmpty(granted);
+        Assert.DoesNotContain(BotId, granted);
+        Assert.DoesNotContain(BotId, await GrantsAsync(host, DeveloperRoleId));
+    }
+
     /// <summary>Two scan intervals without a new assignment.</summary>
     private static async Task ScanQuietAsync(MonzeE2EHost host)
     {

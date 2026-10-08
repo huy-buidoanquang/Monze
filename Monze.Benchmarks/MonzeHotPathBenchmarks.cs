@@ -14,7 +14,6 @@ public class MonzeHotPathBenchmarks
     private IngressEnvelope _envelope;
     private CommandArguments _commandArguments;
     private MonzeCommandRateLimiter _rateLimiter = null!;
-    private DateTimeOffset _rateLimitNow;
     private long _failedWrites;
 
     [GlobalSetup]
@@ -32,9 +31,8 @@ public class MonzeHotPathBenchmarks
             MeetingWindow: TimeSpan.FromMinutes(1),
             AdminLimit: 1_000_000,
             AdminWindow: TimeSpan.FromMinutes(1),
-            MaxEntries: 16));
-        _rateLimitNow = DateTimeOffset.UtcNow;
-        _rateLimiter.TryAcquire(206, 1001, MonzeCommandNames.Role, _rateLimitNow, out _);
+            MaxEntries: 16), FrozenTimeProvider.Instance);
+        _rateLimiter.TryAcquire(206, 1001, MonzeCommandNames.Role, out _);
         // Read the lane the key is written to; reading another lane lets the
         // written lane fill up so TryWrite measures the rejection path (DEF-02).
         _reader = _queue.GetReader(_queue.GetPartition(_envelope.ClanId));
@@ -79,6 +77,5 @@ public class MonzeHotPathBenchmarks
             206,
             1001,
             MonzeCommandNames.Role,
-            _rateLimitNow,
             out _);
 }

@@ -70,7 +70,7 @@ internal static class MonzeHostComposition
             builder.Configuration.GetValue("Monze:Ai:DailyTokenCap", 2_000),
             builder.Configuration.GetValue("Monze:Ai:MaxInputCharacters", 8_000),
             builder.Configuration.GetValue("Monze:Ai:MaxConcurrentRequests", 2)).Normalize());
-        builder.Services.AddSingleton(new MonzeCommandRateLimiter(new MonzeRateLimitOptions(
+        builder.Services.AddSingleton(services => new MonzeCommandRateLimiter(new MonzeRateLimitOptions(
             builder.Configuration.GetValue("Monze:RateLimit:UserLimit", 8),
             TimeSpan.FromSeconds(Math.Clamp(builder.Configuration.GetValue("Monze:RateLimit:UserWindowSeconds", 10), 1, 3600)),
             builder.Configuration.GetValue("Monze:RateLimit:AiLimit", 3),
@@ -79,7 +79,8 @@ internal static class MonzeHostComposition
             TimeSpan.FromSeconds(Math.Clamp(builder.Configuration.GetValue("Monze:RateLimit:MeetingWindowSeconds", 10), 1, 3600)),
             builder.Configuration.GetValue("Monze:RateLimit:AdminLimit", 5),
             TimeSpan.FromSeconds(Math.Clamp(builder.Configuration.GetValue("Monze:RateLimit:AdminWindowSeconds", 60), 1, 3600)),
-            Math.Clamp(builder.Configuration.GetValue("Monze:RateLimit:MaxEntries", 100_000), 1024, 1_000_000))));
+            Math.Clamp(builder.Configuration.GetValue("Monze:RateLimit:MaxEntries", 100_000), 1024, 1_000_000)),
+            services.GetRequiredService<TimeProvider>()));
         builder.Services.AddSingleton<IReadModelCache, DisabledReadModelCache>();
         builder.Services.AddSingleton<IWelcomeDraftStore, MemoryWelcomeDraftStore>();
         builder.Services.AddSingleton<IWelcomeSetupDraftStore, MemoryWelcomeSetupDraftStore>();

@@ -10,23 +10,24 @@ using static Monze.Tests.E2E.Harness.AreaWorld;
 namespace Monze.Tests.E2E.Workflows;
 
 /// <summary>
-/// Pre-registered scale defects, reproduced end to end:
-/// DEF-04 (one welcome worker for every clan: a slow welcome in clan A
-/// delays clan B) and DEF-06 (clan discovery gets at most 100 clans from
-/// the platform, so a bot in 150 clans never joins 50 of them).
+/// Scale defects end to end: DEF-04 (regression: one welcome worker for
+/// every clan let a slow welcome in clan A delay clan B) and DEF-06 (clan
+/// discovery gets at most 100 clans from the platform, so a bot in 150 clans
+/// never joins 50 of them).
 /// </summary>
 public sealed class ScaleDefectWorkflowTests(ITestOutputHelper output)
 {
     /// <summary>
-    /// DEF-04: Features/Welcome/MonzeBot.WelcomeIngress.cs consumes one
-    /// bounded channel with a single reader (MonzeBot.cs, SingleReader = true)
-    /// and awaits every lookup and send inline, so clan B's welcome waits for
-    /// clan A's 4 s member lookup. Correct behaviour asserted: clan B is
-    /// welcomed within 1.5 s of its join.
+    /// Regression for DEF-04: the welcome ingress used to be one bounded
+    /// channel with a single reader that awaited every lookup and send inline,
+    /// so clan B's welcome waited for clan A's 4 s member lookup. Joins are
+    /// now laned by clan (Features/Welcome/MonzeBot.WelcomeIngress.cs, eight
+    /// lanes; these two clans hash to different ones): clan B is welcomed
+    /// within 1.5 s of its join.
     /// </summary>
     [DbFact]
     [Req("REQ-WEL-003")]
-    public async Task A_slow_welcome_in_one_clan_delays_another_clan_DEF_04()
+    public async Task A_slow_welcome_in_one_clan_does_not_delay_another_clan()
     {
         await using var host = await WelcomeWorkflowTests.StartWithWelcomeAsync("wf_def04");
         var setup = await E2EOracles.MarkAsync(host);
@@ -46,7 +47,7 @@ public sealed class ScaleDefectWorkflowTests(ITestOutputHelper output)
         await host.Recorder.WaitForAsync(static action => action.Kind == SimActionKind.SendMessage && action.ClanId == ClanId, TimeSpan.FromSeconds(15), mark.Sequence);
         output.WriteLine($"clan B welcome latency: {latency.TotalMilliseconds:0} ms");
 
-        KnownDefect.ExpectFailure("DEF-04", () => Assert.True(latency < TimeSpan.FromSeconds(1.5), $"Clan B waited {latency.TotalMilliseconds:0} ms."));
+        Assert.True(latency < TimeSpan.FromSeconds(1.5), $"Clan B waited {latency.TotalMilliseconds:0} ms.");
         await E2EOracles.AssertAsync(host, mark, new ScenarioExpectation { OtherOutputs = 2 });
         Assert.Equal(OtherGeneralId, welcomeB.ChannelId);
         Assert.Equal(MonzeMessages.DefaultWelcomeText, E2EContent.Parse(welcomeB).Text);

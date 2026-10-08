@@ -10,10 +10,10 @@ namespace Monze.Tests.Property.Application;
 /// G14: MonzeCommandRateLimiter against a model of fixed windows per
 /// (clan, user, bucket, command) measured in elapsed time, with the documented
 /// bounded table (when full, one expired window is trimmed, otherwise a new key
-/// is rejected). Sequences mix real elapsed time with wall-clock jumps.
-/// Known gap DEF-10: the limiter measures windows with the wall clock it is
-/// given, so a backward jump keeps a window (and a lockout) alive longer than
-/// its length and a forward jump ends it early.
+/// is rejected). Sequences mix real elapsed time with wall-clock jumps, which
+/// must change nothing (regression for DEF-10: windows used to be measured on
+/// the wall clock, so a backward jump extended a lockout and a forward jump
+/// ended a window early).
 /// G14b: concurrent callers on one key never get more than the limit.
 /// </summary>
 public sealed class G14CommandRateLimiterProperties
@@ -48,39 +48,36 @@ public sealed class G14CommandRateLimiterProperties
             {
                 var options = new MonzeRateLimitOptions(
                     item.Limit, item.Window, item.Limit, item.Window, item.Limit, item.Window, item.Limit, item.Window, item.MaxEntries);
-                var limiter = new MonzeCommandRateLimiter(options);
+                var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 8, 0, 0, 0, TimeSpan.Zero));
+                var limiter = new MonzeCommandRateLimiter(options, time);
                 var model = new Dictionary<(long, long, string), (TimeSpan Expires, int Count)>();
                 var elapsed = TimeSpan.Zero;
-                var wall = new DateTimeOffset(2026, 10, 8, 0, 0, 0, TimeSpan.Zero);
                 var backward = false;
                 var forward = false;
                 for (var i = 0; i < item.Operations.Length; i++)
                 {
                     var operation = item.Operations[i];
                     elapsed += operation.Elapsed;
-                    wall += operation.Elapsed + operation.Jump;
+                    time.Advance(operation.Elapsed);
+                    time.JumpWallClock(operation.Jump);
                     backward |= operation.Jump < TimeSpan.Zero;
                     forward |= operation.Jump > TimeSpan.Zero;
                     var key = (operation.Clan, operation.User, Bucket(operation.Command));
                     var expected = Model(model, key, elapsed, item, out var expectedRetry);
-                    var actual = limiter.TryAcquire(operation.Clan, operation.User, operation.Command, wall, out var retry);
-                    if (actual != expected || (!actual && !backward && !forward && retry != expectedRetry))
+                    var actual = limiter.TryAcquire(operation.Clan, operation.User, operation.Command, out var retry);
+                    if (actual != expected || (!actual && retry != expectedRetry))
                     {
                         var clock = backward ? "backward-jump" : forward ? "forward-jump" : "monotonic";
-                        var tags = Tags(item, clock);
                         var note = $"op {i} {operation.Command}: expected {(expected ? "allow" : $"deny {expectedRetry}")}, got {(actual ? "allow" : $"deny {retry}")}";
-                        return backward || forward
-                            ? PropertyResult.Known("DEF-10", item.Describe(), tags, note)
-                            : PropertyResult.Fail(item.Describe(), tags, note);
+                        return PropertyResult.Fail(item.Describe(), Tags(item, clock), note);
                     }
                 }
 
                 var clockTag = backward ? "backward-jump" : forward ? "forward-jump" : "monotonic";
-                return PropertyResult.Pass(item.Describe(), Tags(item, clockTag), backward || forward ? "DEF-10" : null);
+                return PropertyResult.Pass(item.Describe(), Tags(item, clockTag));
             },
             iterations: 4_000,
-            declare: static ledger => ledger.Dimension("clock", Clocks).Dimension("pressure", "bounded", "roomy"),
-            knownDefects: ["DEF-10"]);
+            declare: static ledger => ledger.Dimension("clock", Clocks).Dimension("pressure", "bounded", "roomy"));
     }
 
     [Fact]
@@ -90,7 +87,6 @@ public sealed class G14CommandRateLimiterProperties
         var rounds = 300 * CampaignEnvironment.PbtScale;
         using var ledger = CaseLedger.Open("property", "G14b");
         var random = RunSeed.RandomFor("G14b");
-        var now = new DateTimeOffset(2026, 10, 8, 0, 0, 0, TimeSpan.Zero);
         for (var round = 0; round < rounds; round++)
         {
             var limit = random.Next(1, 40);
@@ -103,7 +99,7 @@ public sealed class G14CommandRateLimiterProperties
             {
                 for (var i = 0; i < attempts; i++)
                 {
-                    if (limiter.TryAcquire(206, 1001, "help", now, out _))
+                    if (limiter.TryAcquire(206, 1001, "help", out _))
                     {
                         Interlocked.Increment(ref allowed);
                     }

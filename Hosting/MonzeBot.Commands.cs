@@ -82,7 +82,6 @@ public sealed partial class MonzeBot
                 clanId,
                 context.Author.Id,
                 commandKey,
-                _time.GetUtcNow(),
                 out var retryAfter))
         {
             var rateLimitResponse = MonzeMessageBuilder.Card(

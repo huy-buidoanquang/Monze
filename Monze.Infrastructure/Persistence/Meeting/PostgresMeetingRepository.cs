@@ -74,20 +74,6 @@ public sealed partial class PostgresMeetingRepository : IMeetingRepository
             await tx.RollbackAsync(cancellationToken);
             return false;
         }
-        await using (var closePreviousContext = new NpgsqlCommand("""
-            UPDATE meeting_session
-            SET context_closed_at = COALESCE(context_closed_at, now())
-            WHERE clan_id = (SELECT clan_id FROM meeting_session WHERE id = @id)
-              AND voice_channel_id = @voice
-              AND root_session_id IS NULL
-              AND context_closed_at IS NULL
-              AND id <> @id;
-            """, connection, tx))
-        {
-            closePreviousContext.Parameters.AddWithValue("id", sessionId);
-            closePreviousContext.Parameters.AddWithValue("voice", voiceChannelId);
-            await closePreviousContext.ExecuteNonQueryAsync(cancellationToken);
-        }
         await using (var expirePrevious = new NpgsqlCommand("""
             UPDATE meeting_session AS previous
             SET status = 'expired', claim_until = NULL
@@ -128,6 +114,23 @@ public sealed partial class PostgresMeetingRepository : IMeetingRepository
             await revert.ExecuteNonQueryAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
             return false;
+        }
+
+        // Only a suggestion that won the room closes the room's previous context;
+        // a losing one must leave the meeting holding the room untouched (CAND-15).
+        await using (var closePreviousContext = new NpgsqlCommand("""
+            UPDATE meeting_session
+            SET context_closed_at = COALESCE(context_closed_at, now())
+            WHERE clan_id = (SELECT clan_id FROM meeting_session WHERE id = @id)
+              AND voice_channel_id = @voice
+              AND root_session_id IS NULL
+              AND context_closed_at IS NULL
+              AND id <> @id;
+            """, connection, tx))
+        {
+            closePreviousContext.Parameters.AddWithValue("id", sessionId);
+            closePreviousContext.Parameters.AddWithValue("voice", voiceChannelId);
+            await closePreviousContext.ExecuteNonQueryAsync(cancellationToken);
         }
 
         await tx.CommitAsync(cancellationToken);

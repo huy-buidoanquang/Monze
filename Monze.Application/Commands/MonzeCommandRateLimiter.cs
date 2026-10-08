@@ -1,24 +1,33 @@
 namespace Monze.Application.Commands;
 
+/// <summary>
+/// Fixed windows per (clan, user, bucket, command), measured on the
+/// monotonic clock of <see cref="TimeProvider.GetTimestamp"/>: a wall-clock
+/// jump neither extends a lockout nor ends a window early (DEF-10).
+/// </summary>
 public sealed class MonzeCommandRateLimiter
 {
     private readonly object _gate = new();
     private readonly MonzeRateLimitOptions _options;
+    private readonly TimeProvider _time;
     private readonly Dictionary<MonzeRateLimitKey, MonzeRateLimitWindow> _windows = new();
 
-    public MonzeCommandRateLimiter(MonzeRateLimitOptions? options = null)
-        => _options = options ?? MonzeRateLimitOptions.Default;
+    public MonzeCommandRateLimiter(MonzeRateLimitOptions? options = null, TimeProvider? time = null)
+    {
+        _options = options ?? MonzeRateLimitOptions.Default;
+        _time = time ?? TimeProvider.System;
+    }
 
     public bool TryAcquire(
         long clanId,
         long userId,
         string command,
-        DateTimeOffset now,
         out TimeSpan retryAfter)
     {
         var commandKey = NormalizeCommand(command.AsSpan());
         var rule = GetRule(commandKey);
         var key = new MonzeRateLimitKey(clanId, userId, rule.Bucket, commandKey);
+        var now = _time.GetTimestamp();
         lock (_gate)
         {
             if (_windows.Count >= _options.MaxEntries)
@@ -33,14 +42,14 @@ public sealed class MonzeCommandRateLimiter
 
             if (!_windows.TryGetValue(key, out var window) || now >= window.ExpiresAt)
             {
-                _windows[key] = new MonzeRateLimitWindow(now.Add(rule.Window), 1);
+                _windows[key] = new MonzeRateLimitWindow(now + (long)(rule.Window.TotalSeconds * _time.TimestampFrequency), 1);
                 retryAfter = TimeSpan.Zero;
                 return true;
             }
 
             if (window.Count >= rule.Limit)
             {
-                retryAfter = window.ExpiresAt - now;
+                retryAfter = _time.GetElapsedTime(now, window.ExpiresAt);
                 return false;
             }
 
@@ -95,7 +104,7 @@ public sealed class MonzeCommandRateLimiter
         return new MonzeRateLimitRule(MonzeRateLimitBucket.User, _options.UserLimit, _options.UserWindow);
     }
 
-    private void TrimOneExpired(DateTimeOffset now)
+    private void TrimOneExpired(long now)
     {
         if (_windows.Count == 0)
         {

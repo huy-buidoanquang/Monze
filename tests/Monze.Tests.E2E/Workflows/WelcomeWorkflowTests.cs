@@ -51,31 +51,31 @@ public sealed class WelcomeWorkflowTests
     }
 
     /// <summary>
-    /// WF-01 (new): a send the platform rejects is answered with an error
-    /// envelope carrying the request cid; Mezon.Net.Sdk 1.6.2 completes the
-    /// ack with it and returns ChannelMessageAckResponse(null) instead of
+    /// Regression for WF-01: a send the platform rejects is answered with an
+    /// error envelope carrying the request cid; Mezon.Net.Sdk 1.6.2 completes
+    /// the ack with it and returns ChannelMessageAckResponse(null) instead of
     /// throwing (Generated/BaseMezonSocketClient.Realtime.g.cs
-    /// SendChatMessageRtAsync). The welcome worker never looks at the ack
-    /// (Features/Welcome/MonzeBot.WelcomeIngress.cs lines 138-142): it logs
-    /// "Welcome message sent", keeps the claim, and the member is never
-    /// welcomed, not even on the next join.
+    /// SendChatMessageRtAsync). The welcome worker used to log "Welcome
+    /// message sent" and keep the claim, so the member was never welcomed.
+    /// An ack without a message id now releases the claim, and the next join
+    /// welcomes the member once.
     /// </summary>
     [DbFact]
     [Req("REQ-WEL-003")]
-    public async Task A_rejected_welcome_send_keeps_the_claim_and_the_member_is_never_welcomed_WF_01()
+    public async Task A_rejected_welcome_send_releases_the_claim_and_the_next_join_is_welcomed()
     {
         await using var host = await StartWithWelcomeAsync("wf_welcome_rejected");
         var mark = await E2EOracles.MarkAsync(host);
         host.Simulator.Faults.Fail(SimOperations.ChannelMessageSend, MezonStatusCode.Internal);
         await host.Inbound.UserAddedAsync(ClanId, JoinerId);
-        await E2EActions.WaitForLogsAsync(host, static entry => entry.Message.StartsWith("Welcome message sent", StringComparison.Ordinal), 1);
+        await E2EActions.WaitForLogsAsync(host, static entry => entry.Message.StartsWith("Welcome worker failed", StringComparison.Ordinal), 1);
         await host.Inbound.UserAddedAsync(ClanId, JoinerId);
-        await E2EActions.WaitForLogsAsync(host, static entry => entry.Message.StartsWith("Welcome event ignored because delivery was already claimed", StringComparison.Ordinal), 1);
+        await E2EActions.WaitForLogsAsync(host, static entry => entry.Message.StartsWith("Welcome message sent", StringComparison.Ordinal), 1);
 
-        await E2EOracles.AssertAsync(host, mark, new ScenarioExpectation { OtherOutputs = 1 });
-        var rejected = Assert.Single(host.Recorder.Since(mark.Sequence), static action => action.Kind == SimActionKind.SendMessage);
-        Assert.Equal((int)MezonStatusCode.Internal, rejected.ResponseCode);
-        KnownDefect.ExpectFailure("WF-01", () => Assert.Single(host.World.MessagesIn(LobbyId), message => message.SenderId == BotId));
+        await E2EOracles.AssertAsync(host, mark, new ScenarioExpectation { OtherOutputs = 2, AllowedWarnings = ["Welcome worker failed"] });
+        var sends = host.Recorder.Since(mark.Sequence).Where(static action => action.Kind == SimActionKind.SendMessage).ToList();
+        Assert.Equal(new[] { (int)MezonStatusCode.Internal, 0 }, sends.Select(static action => action.ResponseCode));
+        Assert.Single(host.World.MessagesIn(LobbyId), message => message.SenderId == BotId);
         await E2EOracles.AssertInvariantsAsync(host);
     }
 

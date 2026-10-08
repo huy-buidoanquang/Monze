@@ -155,8 +155,8 @@ public sealed class RepositoryIsolationTests
 
         Assert.Equal(1, await db.CountAsync("SELECT count(*) FROM meeting_session WHERE id = @id AND status = 'cancelled';", ("id", second)));
         Assert.Equal(1, await db.CountAsync("SELECT count(*) FROM voice_claim WHERE clan_id = @clan AND voice_channel_id = 77 AND session_id = @id;", ("clan", ClanA), ("id", first)));
-        await KnownDefect.ExpectFailureAsync("CAND-15", async () =>
-            Assert.Equal(0, await db.CountAsync("SELECT count(*) FROM meeting_session WHERE id = @id AND context_closed_at IS NOT NULL;", ("id", first))));
+        // Regression for CAND-15: the losing suggestion used to close the winner's context.
+        Assert.Equal(0, await db.CountAsync("SELECT count(*) FROM meeting_session WHERE id = @id AND context_closed_at IS NOT NULL;", ("id", first)));
         await db.AssertTransitionsAsync();
     }
 

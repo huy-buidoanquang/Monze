@@ -15,27 +15,25 @@ public class RateLimiterBenchmarks
 
     private MonzeCommandRateLimiter _limited = null!;
     private MonzeCommandRateLimiter _rotating = null!;
-    private DateTimeOffset _now;
     private long _nextUser;
 
     [GlobalSetup]
     public void Setup()
     {
-        _now = DateTimeOffset.UtcNow;
-        _limited = new MonzeCommandRateLimiter(Options(userLimit: 1));
-        _limited.TryAcquire(206, 1001, MonzeCommandNames.Role, _now, out _);
-        _rotating = new MonzeCommandRateLimiter(Options(userLimit: 1_000_000));
+        _limited = new MonzeCommandRateLimiter(Options(userLimit: 1), FrozenTimeProvider.Instance);
+        _limited.TryAcquire(206, 1001, MonzeCommandNames.Role, out _);
+        _rotating = new MonzeCommandRateLimiter(Options(userLimit: 1_000_000), FrozenTimeProvider.Instance);
         _nextUser = 0;
     }
 
     [Benchmark]
     [ZeroAllocationGate]
     public bool KnownKeyOverLimit()
-        => _limited.TryAcquire(206, 1001, MonzeCommandNames.Role, _now, out _);
+        => _limited.TryAcquire(206, 1001, MonzeCommandNames.Role, out _);
 
     [Benchmark]
     public bool NewKeyRejectedAtEntryBound()
-        => _rotating.TryAcquire(206, ++_nextUser, MonzeCommandNames.Role, _now, out _);
+        => _rotating.TryAcquire(206, ++_nextUser, MonzeCommandNames.Role, out _);
 
     private static MonzeRateLimitOptions Options(int userLimit)
         => new(

@@ -48,16 +48,25 @@ public sealed class CommandRoutingAreaTests
         Assert.Equal(MonzeMessages.UnknownCommand(MonzeCommandOptions.Default), hint.Embeds![0].Fields![0].Value);
     }
 
+    /// <summary>
+    /// Regression for CAND-25: a clan Monze is added to after start-up used
+    /// to stay unregistered until a restart, so its owner was answered as a
+    /// plain member. It is now registered when the bot's own join arrives.
+    /// </summary>
     [DbFact]
     [Req("REQ-CMD-001", "REQ-CONN-001")]
-    [Covers("msg:OwnerOnly")]
-    public async Task A_clan_joined_after_start_up_is_answered_without_admin_rights()
+    [Covers("msg:DelegateMustBeClanMember")]
+    public async Task A_clan_joined_after_start_up_is_registered_with_its_owner()
     {
         await using var host = await E2EActions.StartAsync("routing_late_clan");
         var join = await E2EOracles.MarkAsync(host);
         var added = await host.Inbound.UserAddedAsync(LateClanId, BotId, isBot: true);
         Assert.Equal(1, added.DeliveredSessions);
         await host.Recorder.WaitForAsync(static action => action.Kind == SimActionKind.ClanJoin && action.ClanId == LateClanId && action.ResponseCode == 0, E2EOracles.Timeout, join.Sequence);
+        await E2EActions.WaitUntilAsync(
+            host,
+            async () => await host.ScalarAsync<long>("SELECT count(*) FROM clan_registry WHERE clan_id = @clan AND owner_id = @owner;", ("clan", LateClanId), ("owner", LateOwnerId)) == 1,
+            "the late clan to be registered with its owner");
 
         var mark = await E2EOracles.MarkAsync(host, snapshot: true);
         var help = await E2EActions.CommandAsync(host, LateGeneralId, LateOwnerId, "*monze help", clanId: LateClanId);
@@ -68,9 +77,10 @@ public sealed class CommandRoutingAreaTests
             Inputs = ScenarioExpectation.Of((help, ResponseKind.Ephemeral), (setup, ResponseKind.Reply)).Inputs,
             Unauthorized = true
         });
+        // The owner sees the owner's menu and is refused only because the
+        // mentioned user is not a member of this clan.
         var menu = E2EActions.NewMessageAfter(host, help, LateGeneralId);
-        Assert.DoesNotContain(MonzeButtonId.HelpSetup, E2EContent.Buttons(menu));
-        Assert.Contains(MonzeMessages.OwnerOnly, E2EContent.Visible(E2EActions.NewMessageAfter(host, setup, LateGeneralId)));
-        Assert.Equal(0L, await host.ScalarAsync<long>("SELECT count(*) FROM clan_registry WHERE clan_id = @clan;", ("clan", LateClanId)));
+        Assert.Contains(MonzeButtonId.HelpSetup, E2EContent.Buttons(menu));
+        Assert.Contains(MonzeMessages.DelegateMustBeClanMember, E2EContent.Visible(E2EActions.NewMessageAfter(host, setup, LateGeneralId)));
     }
 }

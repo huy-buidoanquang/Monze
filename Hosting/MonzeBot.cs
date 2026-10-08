@@ -49,7 +49,7 @@ public sealed partial class MonzeBot : BackgroundService
     private readonly IEventIngressQueue<ChannelMessageEventData> _messageIngress;
     private readonly Channel<MessageGapIngressItem> _messageGapIngress;
     private readonly Channel<MeetingIngressItem> _meetingIngress;
-    private readonly Channel<WelcomeIngressItem> _welcomeIngress;
+    private readonly PartitionedIngressQueue<WelcomeIngressItem> _welcomeIngress;
     private readonly ConcurrentDictionary<VoiceKey, int> _voiceOccupancy = new();
     private readonly ConcurrentDictionary<long, ConcurrentDictionary<long, byte>> _voiceChannelsByClan = new();
     private readonly ConcurrentDictionary<long, long> _voiceClanByChannel = new();
@@ -189,14 +189,8 @@ public sealed partial class MonzeBot : BackgroundService
                 SingleWriter = false,
                 AllowSynchronousContinuations = false
             });
-        _welcomeIngress = Channel.CreateBounded<WelcomeIngressItem>(
-            new BoundedChannelOptions(1024)
-            {
-                FullMode = BoundedChannelFullMode.Wait,
-                SingleReader = true,
-                SingleWriter = false,
-                AllowSynchronousContinuations = false
-            });
+        // One lane per clan hash: a slow welcome delays only its own lane (DEF-04).
+        _welcomeIngress = new PartitionedIngressQueue<WelcomeIngressItem>(WelcomePartitions, 1024);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -298,7 +292,7 @@ public sealed partial class MonzeBot : BackgroundService
 
             _messageIngress.Complete();
             _meetingIngress.Writer.TryComplete();
-            _welcomeIngress.Writer.TryComplete();
+            _welcomeIngress.Complete();
             try
             {
                 await Task.WhenAll(

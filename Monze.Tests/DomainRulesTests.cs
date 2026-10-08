@@ -2,6 +2,7 @@ using Monze.Domain;
 using Monze.Application;
 using Monze.Application.Commands;
 using Monze.Infrastructure.Persistence;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
@@ -260,6 +261,7 @@ public class DomainRulesTests
     [Fact]
     public void Command_rate_limiter_is_scoped_to_clan_and_user()
     {
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 9, 0, 0, 0, TimeSpan.Zero));
         var limiter = new MonzeCommandRateLimiter(new MonzeRateLimitOptions(
             UserLimit: 1,
             UserWindow: TimeSpan.FromMinutes(1),
@@ -269,18 +271,19 @@ public class DomainRulesTests
             MeetingWindow: TimeSpan.FromMinutes(1),
             AdminLimit: 1,
             AdminWindow: TimeSpan.FromMinutes(1),
-            MaxEntries: 16));
-        var now = DateTimeOffset.UtcNow;
+            MaxEntries: 16), time);
 
-        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Role, now, out _));
-        Assert.False(limiter.TryAcquire(1, 10, MonzeCommandNames.Role, now, out var retry));
+        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Role, out _));
+        Assert.False(limiter.TryAcquire(1, 10, MonzeCommandNames.Role, out var retry));
         Assert.True(retry > TimeSpan.Zero);
-        Assert.True(limiter.TryAcquire(2, 10, MonzeCommandNames.Role, now, out _));
+        Assert.True(limiter.TryAcquire(2, 10, MonzeCommandNames.Role, out _));
     }
 
+    /// <summary>Regression for DEF-10: a wall-clock jump neither ends a window early nor extends a lockout.</summary>
     [Fact]
-    public void Command_rate_limiter_removes_expired_entry_before_capacity_check()
+    public void Command_rate_limiter_ignores_wall_clock_jumps()
     {
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 9, 0, 0, 0, TimeSpan.Zero));
         var limiter = new MonzeCommandRateLimiter(new MonzeRateLimitOptions(
             UserLimit: 1,
             UserWindow: TimeSpan.FromSeconds(10),
@@ -290,16 +293,42 @@ public class DomainRulesTests
             MeetingWindow: TimeSpan.FromSeconds(10),
             AdminLimit: 1,
             AdminWindow: TimeSpan.FromSeconds(10),
-            MaxEntries: 1));
-        var now = DateTimeOffset.UtcNow;
+            MaxEntries: 16), time);
 
-        Assert.True(limiter.TryAcquire(1, 1, MonzeCommandNames.Role, now, out _));
-        Assert.True(limiter.TryAcquire(2, 2, MonzeCommandNames.Role, now.AddSeconds(11), out _));
+        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Role, out _));
+        time.JumpWallClock(TimeSpan.FromHours(2));
+        Assert.False(limiter.TryAcquire(1, 10, MonzeCommandNames.Role, out var retry));
+        Assert.Equal(TimeSpan.FromSeconds(10), retry);
+
+        time.JumpWallClock(TimeSpan.FromHours(-4));
+        time.Advance(TimeSpan.FromSeconds(10));
+        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Role, out _));
+    }
+
+    [Fact]
+    public void Command_rate_limiter_removes_expired_entry_before_capacity_check()
+    {
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 9, 0, 0, 0, TimeSpan.Zero));
+        var limiter = new MonzeCommandRateLimiter(new MonzeRateLimitOptions(
+            UserLimit: 1,
+            UserWindow: TimeSpan.FromSeconds(10),
+            AiLimit: 1,
+            AiWindow: TimeSpan.FromSeconds(10),
+            MeetingLimit: 1,
+            MeetingWindow: TimeSpan.FromSeconds(10),
+            AdminLimit: 1,
+            AdminWindow: TimeSpan.FromSeconds(10),
+            MaxEntries: 1), time);
+
+        Assert.True(limiter.TryAcquire(1, 1, MonzeCommandNames.Role, out _));
+        time.Advance(TimeSpan.FromSeconds(11));
+        Assert.True(limiter.TryAcquire(2, 2, MonzeCommandNames.Role, out _));
     }
 
     [Fact]
     public void Command_rate_limiter_isolated_by_command_within_same_policy_group()
     {
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 9, 0, 0, 0, TimeSpan.Zero));
         var limiter = new MonzeCommandRateLimiter(new MonzeRateLimitOptions(
             UserLimit: 2,
             UserWindow: TimeSpan.FromMinutes(1),
@@ -309,17 +338,17 @@ public class DomainRulesTests
             MeetingWindow: TimeSpan.FromMinutes(1),
             AdminLimit: 1,
             AdminWindow: TimeSpan.FromMinutes(1),
-            MaxEntries: 16));
-        var now = DateTimeOffset.UtcNow;
+            MaxEntries: 16), time);
 
-        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Welcome, now, out _));
-        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Setup, now, out _));
-        Assert.False(limiter.TryAcquire(1, 10, MonzeCommandNames.Welcome, now, out _));
+        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Welcome, out _));
+        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Setup, out _));
+        Assert.False(limiter.TryAcquire(1, 10, MonzeCommandNames.Welcome, out _));
     }
 
     [Fact]
     public void Command_rate_limiter_normalizes_command_before_selecting_policy()
     {
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 9, 0, 0, 0, TimeSpan.Zero));
         var limiter = new MonzeCommandRateLimiter(new MonzeRateLimitOptions(
             UserLimit: 10,
             UserWindow: TimeSpan.FromMinutes(1),
@@ -329,16 +358,16 @@ public class DomainRulesTests
             MeetingWindow: TimeSpan.FromMinutes(1),
             AdminLimit: 1,
             AdminWindow: TimeSpan.FromMinutes(1),
-            MaxEntries: 16));
-        var now = DateTimeOffset.UtcNow;
+            MaxEntries: 16), time);
 
-        Assert.True(limiter.TryAcquire(1, 10, " WELCOME ", now, out _));
-        Assert.False(limiter.TryAcquire(1, 10, "WELCOME", now, out _));
+        Assert.True(limiter.TryAcquire(1, 10, " WELCOME ", out _));
+        Assert.False(limiter.TryAcquire(1, 10, "WELCOME", out _));
     }
 
     [Fact]
     public void Top_level_summary_uses_the_meeting_bucket_instead_of_the_ai_bucket()
     {
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 9, 0, 0, 0, TimeSpan.Zero));
         var limiter = new MonzeCommandRateLimiter(new MonzeRateLimitOptions(
             UserLimit: 8,
             UserWindow: TimeSpan.FromSeconds(10),
@@ -348,18 +377,18 @@ public class DomainRulesTests
             MeetingWindow: TimeSpan.FromSeconds(10),
             AdminLimit: 5,
             AdminWindow: TimeSpan.FromMinutes(1),
-            MaxEntries: 100));
-        var now = DateTimeOffset.UtcNow;
+            MaxEntries: 100), time);
 
-        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Summary, now, out _));
-        Assert.False(limiter.TryAcquire(1, 10, MonzeCommandNames.Summary, now, out _));
-        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Ai, now, out _));
-        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Ai, now, out _));
+        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Summary, out _));
+        Assert.False(limiter.TryAcquire(1, 10, MonzeCommandNames.Summary, out _));
+        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Ai, out _));
+        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Ai, out _));
     }
 
     [Fact]
     public void Command_rate_limiter_reuses_typed_key_without_hotpath_allocation()
     {
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 9, 0, 0, 0, TimeSpan.Zero));
         var limiter = new MonzeCommandRateLimiter(new MonzeRateLimitOptions(
             UserLimit: 10_000,
             UserWindow: TimeSpan.FromMinutes(1),
@@ -369,9 +398,8 @@ public class DomainRulesTests
             MeetingWindow: TimeSpan.FromMinutes(1),
             AdminLimit: 10_000,
             AdminWindow: TimeSpan.FromMinutes(1),
-            MaxEntries: 16));
-        var now = DateTimeOffset.UtcNow;
-        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Role, now, out _));
+            MaxEntries: 16), time);
+        Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Role, out _));
 
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -380,7 +408,7 @@ public class DomainRulesTests
 
         for (var i = 0; i < 1000; i++)
         {
-            Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Role, now, out _));
+            Assert.True(limiter.TryAcquire(1, 10, MonzeCommandNames.Role, out _));
         }
 
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;

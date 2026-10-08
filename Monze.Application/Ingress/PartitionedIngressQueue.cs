@@ -66,6 +66,10 @@ public sealed class PartitionedIngressQueue<T> : IEventIngressQueue<T>
     public bool TryWrite(long key, T item)
         => _lanes[GetPartition(key)].Writer.TryWrite(item);
 
+    /// <summary>Waits for room in <paramref name="key"/>'s lane (for events that must not be dropped).</summary>
+    public ValueTask WriteAsync(long key, T item, CancellationToken cancellationToken = default)
+        => _lanes[GetPartition(key)].Writer.WriteAsync(item, cancellationToken);
+
     public void Complete(Exception? error = null)
     {
         for (var i = 0; i < _lanes.Length; i++)
