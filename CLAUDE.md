@@ -16,8 +16,7 @@ Restore is locked: `Directory.Build.props` sets `RestorePackagesWithLockFile` an
 dotnet restore Monze.slnx
 ./scripts/build-release.ps1 -BuildTests
 dotnet test Monze.slnx --configuration Release --no-build
-$env:MONZE_RUN_DB_TESTS = '1'
-dotnet test Monze.slnx --configuration Release --no-build
+pwsh scripts/run-test-campaign.ps1            # quick campaign: containers, every tier, one REPORT.md
 ./scripts/inspect-db.ps1 -ClanId <clan> -ChannelId <channel> -Assert
 git diff --check
 ```
@@ -27,10 +26,17 @@ git diff --check
 - Keep the SDK package set in sync (see SDK and Workspace Boundaries below).
 
 ### Tests
-- Single test: `dotnet test Monze.Tests/Monze.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~PostgresMeetingCycleTests"`.
-- **PostgreSQL tests return early and report as passed (not skipped) unless `MONZE_RUN_DB_TESTS=1`.** A green run without that variable proves nothing about the database.
-- The PostgreSQL test connection string comes from the nearest `appsettings.json`, `appsettings.Development.local.json` or `appsettings.secrets.json` (`PostgresTestConfiguration.cs`).
-- The Redis integration test is gated by `MONZE_REDIS_CONNECTION`.
+- Single test: `dotnet test Monze.Tests/Monze.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~CommandHelpTests"`; database tests live in `tests/Monze.Tests.Integration` (e.g. `--filter "FullyQualifiedName~PostgresMeetingCycleTests"` with `MONZE_TEST_POSTGRES` set).
+- **Database tests (`[DbFact]`) only use the guarded campaign PostgreSQL in `MONZE_TEST_POSTGRES`** (loopback, port other than 5432, database `monze_*`, `cluster_name` starting `monze-test-`); `MONZE_TEST_POSTGRES_ALT` is the second server. Without it they are reported as skipped; in a strict campaign (`MONZE_CAMPAIGN_STRICT=1`) they fail. Tests never read `appsettings*.json`, and those files are stripped from every test output.
+- Redis tests (`[RedisFact]`) use `MONZE_REDIS_CONNECTION` under the same guard (loopback, not port 6379). `[DockerFact]` tests run only in a strict campaign.
+- Test projects: `Monze.Tests` (unit, contract, inventory), `tests/Monze.Tests.Property` (CsCheck generators), `tests/Monze.Tests.Integration` (database and Redis), `tests/Monze.Tests.E2E` (the real host on the offline Mezon simulator in `tests/Monze.Simulator`), `tests/Monze.Campaign` (component, load, k6, capacity, chaos and soak runner) and `tests/Monze.TestReport` (report builder). Shared helpers are in `tests/Monze.Testing`.
+- Every known-defect marker (`KnownDefect.ExpectFailure*`, `KnownGap`, `PropertyResult.Known`) must be registered in `tests/traceability/expected-gaps.json`; `[Req]` ids must exist in `tests/traceability/requirements.json`. The inventory tests enforce both.
+
+### Test campaign
+- `pwsh scripts/run-test-campaign.ps1` runs the quick profile (about 15–30 minutes); `-Full` adds every micro benchmark, the full load matrix, k6, all chaos scenarios and a 10-minute soak; `-Full -Soak` makes the soak `-SoakMinutes` long (default 120, needed for G4); `-Tiers a,b` selects tiers; `-Deep` scales the property generators.
+- It starts throwaway containers from local images (`--pull never`) labelled `monze.campaign=<id>` on ports 55432/55433/56379 and removes them at the end. It never touches the PostgreSQL service on 5432 or `mezube-redis-1`.
+- The single report is `docs/test-artifacts/<stamp>-<profile>-campaign/REPORT.md` with `campaign-summary.json`; `raw/` next to it is git-ignored. Exit codes: 0 pass, 1 failure, 2 blocked or not run, 3 harness or build error, 4 redaction violation.
+- Chaos runs its own durable PostgreSQL and Redis containers, because it pauses, stops and kills them.
 
 ### Scripts
 - `./scripts/inspect-db.ps1`:
@@ -62,7 +68,7 @@ The solution `Monze.slnx` targets net10.0 throughout.
   - `Ui/`: message, embed, button and form builders, plus interaction identifiers. Keep UI text and command names centralized here.
 
 ### Supporting folders
-- `Monze.Tests`: xUnit unit and integration tests.
+- `Monze.Tests` and `tests/`: the test projects and campaign tooling listed under Tests.
 - `Monze.Benchmarks`: BenchmarkDotNet microbenchmarks. Their results are isolated evidence, not proof of production capacity.
 - `scripts/`: Release build, database inspection and approved dev cleanup helpers.
 - `docs/`: architecture, performance, capacity gates, database verification, commands and SDK handoff records. Most of it is in Vietnamese.
