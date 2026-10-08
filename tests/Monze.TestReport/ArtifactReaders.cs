@@ -257,7 +257,10 @@ internal static partial class ArtifactReaders
                         : [],
                     root.TryGetProperty("failures", out var failures)
                         ? failures.EnumerateArray().Select(static item => item.GetString() ?? string.Empty).ToList()
-                        : []));
+                        : [],
+                    root.TryGetProperty("requested", out var requestedCount) && requestedCount.ValueKind == JsonValueKind.Number
+                        ? requestedCount.GetInt64()
+                        : null));
             }
         }
 

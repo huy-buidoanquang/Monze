@@ -48,6 +48,12 @@ public sealed class CaseLedger : IDisposable
         }
     }
 
+    /// <summary>
+    /// Checks the test intended to run. When the summary total is lower, the
+    /// run was cut by its time cap and the report shows it as under-sampled.
+    /// </summary>
+    public long? Requested { get; set; }
+
     public IReadOnlyList<string> Failures
     {
         get
@@ -72,6 +78,9 @@ public sealed class CaseLedger : IDisposable
 
         return new CaseLedger(suite, testId, writer);
     }
+
+    /// <summary>A ledger that counts but never writes, for tests of the test harness itself.</summary>
+    public static CaseLedger Unrecorded(string suite, string testId) => new(suite, testId, null);
 
     /// <summary>Declares a finite dimension so the summary can report pairwise coverage.</summary>
     public CaseLedger Dimension(string name, params string[] values)
@@ -194,6 +203,7 @@ public sealed class CaseLedger : IDisposable
                 suite = _suite,
                 testId = _testId,
                 total = _outcomes.Values.Sum(),
+                requested = Requested,
                 distinctInputs = _inputs.Count,
                 outcomes = _outcomes,
                 tags = _tags,

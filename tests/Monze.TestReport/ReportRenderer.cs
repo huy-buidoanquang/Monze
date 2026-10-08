@@ -184,16 +184,20 @@ internal sealed class ReportRenderer
             return;
         }
 
-        md.AppendLine("| Generator | Số check | Input khác nhau | Pass | Fail | Pairwise |");
-        md.AppendLine("|---|---|---|---|---|---|");
+        md.AppendLine("| Generator | Số check | Yêu cầu | Input khác nhau | Pass | Xfail | Fail | Pairwise |");
+        md.AppendLine("|---|---|---|---|---|---|---|---|");
         foreach (var generator in _model.Generators.OrderBy(static g => g.TestId, StringComparer.Ordinal))
         {
             var pass = generator.Outcomes.TryGetValue("pass", out var passed) ? passed : 0;
+            var xfail = generator.Outcomes.TryGetValue("xfail", out var expectedFailures) ? expectedFailures : 0;
             var fail = generator.Outcomes.TryGetValue("fail", out var failed) ? failed : 0;
             var pairwise = generator.PairsRequired == 0
                 ? "—"
                 : $"{generator.PairsCovered}/{generator.PairsRequired} ({Percent(generator.PairsRequired == 0 ? 0 : (double)generator.PairsCovered / generator.PairsRequired)})";
-            md.AppendLine($"| {Cell(generator.Suite)}/{Cell(generator.TestId)} | {N(generator.Total)} | {N(generator.DistinctInputs)} | {N(pass)} | {N(fail)} | {pairwise} |");
+            var requested = generator.Requested is { } count
+                ? N(count) + (generator.Total < count ? " ⚠ lấy mẫu thiếu (chạm time cap)" : string.Empty)
+                : "—";
+            md.AppendLine($"| {Cell(generator.Suite)}/{Cell(generator.TestId)} | {N(generator.Total)} | {requested} | {N(generator.DistinctInputs)} | {N(pass)} | {N(xfail)} | {N(fail)} | {pairwise} |");
         }
 
         var total = _model.Generators.Sum(static g => g.Total);

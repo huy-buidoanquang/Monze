@@ -443,6 +443,14 @@
       "tests": []
     },
     {
+      "id": "REQ-PBT-001",
+      "area": "property",
+      "title": "Harness property: seed tái lập case, shrink counterexample, known defect xfail/xpass, pairwise đủ 100%",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
       "id": "REQ-TRACE-001",
       "area": "traceability",
       "title": "Mọi mục inventory được khai báo bởi requirement hoặc exclusion có lý do",

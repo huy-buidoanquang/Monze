@@ -72,7 +72,8 @@ internal sealed record GeneratorSummary(
     int PairsRequired,
     int PairsCovered,
     IReadOnlyList<string> MissingPairs,
-    IReadOnlyList<string> Failures);
+    IReadOnlyList<string> Failures,
+    long? Requested);
 
 internal sealed record KnownDefectResult(string DefectId, string Outcome, int Occurrences);
 

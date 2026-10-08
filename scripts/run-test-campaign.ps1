@@ -49,7 +49,7 @@ Set-Location $repo
 $profileName = if ($Full -and $Soak) { 'full-soak' } elseif ($Full) { 'full' } elseif ($Deep) { 'deep' } elseif ($Soak) { 'soak' } else { 'quick' }
 $allTiers = @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'component', 'load', 'k6', 'capacity', 'chaos', 'soak', 'live')
 # Tiers whose runners exist in this revision. Later commits add to this list.
-$implemented = @('build', 'inventory', 'unit', 'integration', 'micro')
+$implemented = @('build', 'inventory', 'unit', 'property', 'integration', 'micro')
 $profileTiers = switch ($profileName) {
     'quick' { @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'load', 'capacity', 'chaos') }
     'deep' { @('build', 'inventory', 'unit', 'property', 'integration', 'e2e') }
@@ -333,6 +333,9 @@ try {
             }
             'unit' {
                 $result = Invoke-TestTier -Tier 'unit' -Project 'Monze.Tests/Monze.Tests.csproj' -Filter 'FullyQualifiedName!~Monze.Tests.Inventory' -TimeoutMinutes 20 -Coverage
+            }
+            'property' {
+                $result = Invoke-TestTier -Tier 'property' -Project 'tests/Monze.Tests.Property/Monze.Tests.Property.csproj' -TimeoutMinutes $(if ($Deep) { 600 } else { 90 }) -Coverage
             }
             'integration' {
                 $env:MONZE_TEST_POSTGRES = "Host=127.0.0.1;Port=55432;Database=monze_t_integration;Username=monze;Password=$($secrets.postgres)"

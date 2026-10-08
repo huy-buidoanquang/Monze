@@ -68,6 +68,22 @@ public sealed partial class InventoryTraceabilityTests
 
     [Fact]
     [Req("REQ-TRACE-002")]
+    public void Every_Covers_attribute_names_an_inventory_item()
+    {
+        var model = Model.Value;
+        var items = model.Items.Select(static item => item.Id).ToHashSet(StringComparer.Ordinal);
+
+        var unknown = model.TestMethods
+            .SelectMany(static test => test.Covers.Select(id => (test.Name, Id: id)))
+            .Where(reference => !items.Contains(reference.Id))
+            .Select(static reference => $"{reference.Name} -> {reference.Id}")
+            .ToList();
+
+        Assert.True(unknown.Count == 0, $"Tests cover unknown inventory items:{Environment.NewLine}{string.Join(Environment.NewLine, unknown)}");
+    }
+
+    [Fact]
+    [Req("REQ-TRACE-002")]
     public void Requirement_ids_are_unique_and_well_formed()
     {
         var ids = Model.Value.Requirements.Select(static requirement => requirement.Id).ToList();

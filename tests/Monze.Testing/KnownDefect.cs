@@ -30,7 +30,7 @@ public static class KnownDefect
         throw new XPassException(defectId);
     }
 
-    public static void ExpectFailure(string defectId, Action correctBehaviour)
+    public static void ExpectFailure(string defectId, Action correctBehaviour, bool record = true)
     {
         try
         {
@@ -38,11 +38,19 @@ public static class KnownDefect
         }
         catch (Exception ex) when (ex is not XPassException)
         {
-            Write(defectId, "xfail", ex.GetType().Name);
+            if (record)
+            {
+                Write(defectId, "xfail", ex.GetType().Name);
+            }
+
             return;
         }
 
-        Write(defectId, "xpass", null);
+        if (record)
+        {
+            Write(defectId, "xpass", null);
+        }
+
         throw new XPassException(defectId);
     }
 
