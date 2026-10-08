@@ -111,7 +111,7 @@
       "area": "meeting",
       "title": "Tóm tắt meeting: lấy transcript, retry có lease, soạn và gửi đúng một lần",
       "legacyTestIds": ["CMD-SUMMARY", "WRK-SUMMARY"],
-      "covers": ["cmd:summary", "msg:TitleSummary", "msg:NoSummary", "msg:SummaryAdminOnly", "msg:SummaryFailed", "port:ITranscriptClient.*", "http:api/v2/*", "table:meeting_summary", "log@Features/Meeting/MeetingMaintenanceWorker.cs"],
+      "covers": ["log@Features/Meeting/MonzeBot.SummaryFetch.cs", "log@Infrastructure/Agent/HttpTranscriptClient.cs", "cmd:summary", "msg:TitleSummary", "msg:NoSummary", "msg:SummaryAdminOnly", "msg:SummaryFailed", "port:ITranscriptClient.*", "http:api/v2/*", "table:meeting_summary", "log@Features/Meeting/MeetingMaintenanceWorker.cs"],
       "tests": ["HttpTranscriptClientTests.*", "MeetingSummaryComposerTests.*", "MeetingMaintenanceWorkerTests.*", "PostgresMeetingSummaryDeliveryTests.*"]
     },
     {
@@ -287,7 +287,7 @@
       "area": "hosting",
       "title": "Vòng đời bot: chờ readiness, đăng nhập, chạy worker, dừng và drain",
       "legacyTestIds": [],
-      "covers": ["log@Hosting/MonzeBot.cs", "log@Hosting/MonzeBot.Lifecycle.cs"],
+      "covers": ["log@Hosting/MonzeBot.cs", "log@Hosting/MonzeBot.Lifecycle.cs", "log@Hosting/StartupSchemaValidator.cs"],
       "tests": []
     },
     {

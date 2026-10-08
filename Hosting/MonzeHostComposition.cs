@@ -199,7 +199,8 @@ internal static class MonzeHostComposition
                     http,
                     transcriptBotId,
                     transcriptBotToken,
-                    sp.GetRequiredService<TimeProvider>());
+                    sp.GetRequiredService<TimeProvider>(),
+                    sp.GetRequiredService<ILogger<HttpTranscriptClient>>());
             });
 
             builder.Services.AddSingleton(MonzeWorkerTimings.From(builder.Configuration));

@@ -58,7 +58,7 @@ public sealed partial class MonzeBot
             {
                 _logger.LogInformation("Outbox {OutboxId} was delivered before its ack was lost; recorded without resending.", item.Id);
                 MonzeMetrics.OutboxDelivered.Add(1);
-                await TryCompleteOutboxAsync(item.Id, item.LeaseToken, messageId, false, cancellationToken, null);
+                await TryCompleteOutboxAsync(item.Id, item.LeaseToken, messageId, false, null);
             }
             else
             {

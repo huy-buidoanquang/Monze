@@ -1,7 +1,10 @@
+using System.Net;
 using Microsoft.Extensions.Logging;
+using Monze.Hosting;
 using Monze.Infrastructure.Persistence;
 using Monze.Simulator;
 using Monze.Testing;
+using Monze.Testing.Harness;
 using Monze.Testing.Postgres;
 using Monze.Tests.E2E.Harness;
 using Npgsql;
@@ -90,8 +93,45 @@ public sealed class HostLifecycleWorkflowTests
     {
         await using var database = await CampaignDatabase.CreateEmptyAsync(TestPostgres.ConnectionString, "e2e_wf_noschema");
         await using var simulator = new MezonSimulator(AreaWorld.Create());
-        await Assert.ThrowsAnyAsync<Exception>(() => E2EActions.StartAsync("wf_noschema", database: database, simulator: simulator));
+
+        // A schema error is not retried like an unreachable database (CAND-29).
+        var failure = await Assert.ThrowsAnyAsync<Exception>(() => E2EActions.StartAsync("wf_noschema", database: database, simulator: simulator).WaitAsync(TimeSpan.FromSeconds(60)));
+        Assert.IsNotType<TimeoutException>(failure);
         Assert.DoesNotContain(simulator.Recorder.Actions, static action => action.Kind is SimActionKind.Authenticate or SimActionKind.Connect);
         Assert.Empty(simulator.Sessions);
+    }
+
+    /// <summary>
+    /// Regression for CAND-29: PostgreSQL that refuses connections when the
+    /// host starts (started together with the bot) is retried, and the schema
+    /// check passes once it answers.
+    /// </summary>
+    [DbFact]
+    [Req("REQ-HOST-011")]
+    public async Task A_database_that_answers_late_passes_the_schema_check()
+    {
+        await using var database = await CampaignDatabase.CreateEmptyAsync(TestPostgres.ConnectionString, "e2e_wf_late");
+        await using (var migrate = NpgsqlDataSource.Create(database.ConnectionString))
+        {
+            await PostgresMigrator.ApplyAsync(migrate, database.ConnectionString, CancellationToken.None);
+        }
+
+        var connection = new NpgsqlConnectionStringBuilder(database.ConnectionString);
+        await using var proxy = TcpFaultProxy.Start(new IPEndPoint(IPAddress.Loopback, connection.Port));
+        proxy.Mode = TcpFaultMode.Refuse;
+        connection.Port = proxy.Endpoint.Port;
+        await using var dataSource = NpgsqlDataSource.Create(connection.ConnectionString);
+        var logs = new HostLogSink();
+        using var loggers = new LoggerFactory([logs]);
+        var readiness = new StartupReadiness();
+        var validator = new StartupSchemaValidator(dataSource, readiness, TimeProvider.System, loggers.CreateLogger<StartupSchemaValidator>());
+
+        var start = validator.StartAsync(CancellationToken.None);
+        await logs.WaitForAsync(static entry => entry.Level == LogLevel.Warning, TimeSpan.FromSeconds(10));
+        Assert.False(readiness.Ready.IsCompleted);
+        proxy.Mode = TcpFaultMode.Pass;
+
+        await start.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.True(readiness.Ready.IsCompletedSuccessfully);
     }
 }

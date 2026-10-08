@@ -166,7 +166,16 @@ public sealed partial class MonzeBot
             var wait = pacer.Reserve();
             if (wait > TimeSpan.Zero)
             {
-                await Task.Delay(wait, _time, cancellationToken);
+                try
+                {
+                    await Task.Delay(wait, _time, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    // Stopping before the send: hand the row back now instead of after its lease.
+                    await TryCompleteOutboxAsync(item.Id, item.LeaseToken, null, false, "delivery-not-sent", countsAsAttempt: false);
+                    throw;
+                }
             }
 
             await DeliverOutboxAsync(client, item, cancellationToken);
@@ -215,7 +224,6 @@ public sealed partial class MonzeBot
                 item.LeaseToken,
                 null,
                 true,
-                cancellationToken,
                 "invalid-kind");
             return;
         }
@@ -236,7 +244,6 @@ public sealed partial class MonzeBot
                 item.LeaseToken,
                 item.ExternalMessageId,
                 action == OutboxAction.HoldForAdmin,
-                cancellationToken,
                 action == OutboxAction.HoldForAdmin ? "retry-limit" : null);
             return;
         }
@@ -263,7 +270,6 @@ public sealed partial class MonzeBot
                     item.LeaseToken,
                     null,
                     true,
-                    cancellationToken,
                     "delivery-uncertain");
                 return;
             }
@@ -273,9 +279,14 @@ public sealed partial class MonzeBot
                 item.LeaseToken,
                 ackMessageId,
                 false,
-                cancellationToken,
                 null);
             MonzeMetrics.OutboxDelivered.Add(1);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Stopping while the send may be on the wire: reconcile it rather than resend it.
+            await TryCompleteOutboxAsync(item.Id, item.LeaseToken, null, true, "delivery-uncertain");
+            throw;
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
@@ -285,7 +296,7 @@ public sealed partial class MonzeBot
             {
                 // The message may be on the channel: reconcile, never resend blindly.
                 MonzeMetrics.OutboxUncertain.Add(1);
-                await TryCompleteOutboxAsync(item.Id, item.LeaseToken, null, true, cancellationToken, "delivery-uncertain");
+                await TryCompleteOutboxAsync(item.Id, item.LeaseToken, null, true, "delivery-uncertain");
                 return;
             }
 
@@ -293,7 +304,7 @@ public sealed partial class MonzeBot
             if (failure == OutboxFailureKind.NotSent)
             {
                 // Nothing left the process (the socket is closed): retry until it is back.
-                await TryCompleteOutboxAsync(item.Id, item.LeaseToken, null, false, cancellationToken, "delivery-not-sent", countsAsAttempt: false);
+                await TryCompleteOutboxAsync(item.Id, item.LeaseToken, null, false, "delivery-not-sent", countsAsAttempt: false);
                 return;
             }
 
@@ -304,7 +315,6 @@ public sealed partial class MonzeBot
                 item.LeaseToken,
                 null,
                 hold,
-                cancellationToken,
                 failure == OutboxFailureKind.Rejected ? "delivery-rejected" : hold ? "retry-limit" : "delivery-failed");
         }
     }
@@ -322,15 +332,22 @@ public sealed partial class MonzeBot
             : content;
     }
 
+    /// <summary>
+    /// Records how a delivery attempt ended on an <see cref="OutcomeTimeout"/>,
+    /// not on the worker's stopping token: an acked message whose completion
+    /// is dropped at shutdown would stay leased and be reconciled or resent
+    /// (WF-05), and a timeout while the bot runs would do the same whenever
+    /// the database is slow.
+    /// </summary>
     private async Task TryCompleteOutboxAsync(
         long id,
         string leaseToken,
         long? externalMessageId,
         bool failed,
-        CancellationToken cancellationToken,
         string? errorCode,
         bool countsAsAttempt = true)
     {
+        using var timeout = NewOutcomeTimeout();
         try
         {
             await _outbox.CompleteOutboxAsync(
@@ -338,17 +355,13 @@ public sealed partial class MonzeBot
                 leaseToken,
                 externalMessageId,
                 failed,
-                cancellationToken,
+                timeout.Token,
                 errorCode,
                 countsAsAttempt);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (Exception ex)
         {
-            _logger.LogWarning("Outbox {OutboxId} completion timed out; lease will be reclaimed.", id);
-        }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            _logger.LogWarning(ex, "Outbox {OutboxId} completion failed; lease will be reclaimed.", id);
+            _logger.LogWarning(ex, "Outbox {OutboxId} completion failed; the row is reconciled once its lease expires.", id);
         }
     }
 

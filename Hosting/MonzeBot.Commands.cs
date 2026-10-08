@@ -146,6 +146,22 @@ public sealed partial class MonzeBot
         }
         catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
         {
+            if (aiLoadingMessageId > 0)
+            {
+                // Stopped mid-request: replace the loading card instead of leaving it behind (WF-06).
+                try
+                {
+                    await UpdateCommandAsync(
+                        context,
+                        aiLoadingMessageId,
+                        MonzeMessageBuilder.Card(MonzeMessages.TitleMonze, MonzeMessages.TemporaryFailure, MonzeTone.Error))
+                        .WaitAsync(_timings.UncertainMarkTimeout, _time);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "The AI loading card could not be closed while stopping. LoadingMessage={LoadingMessageId}.", aiLoadingMessageId);
+                }
+            }
         }
         catch (Exception ex)
         {

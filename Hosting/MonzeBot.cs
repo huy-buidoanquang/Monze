@@ -55,6 +55,8 @@ public sealed partial class MonzeBot : BackgroundService
     private readonly ConcurrentDictionary<long, long> _voiceClanByChannel = new();
     private readonly ConcurrentDictionary<long, long> _welcomeChannelIds = new();
     private readonly VoiceSnapshotGuard _voiceSnapshots = new();
+    private const int MessageGapOverflowLimit = 4096;
+    private readonly ConcurrentDictionary<ChannelPolicyKey, long> _overflowedGaps = new();
     private readonly ConcurrentDictionary<long, SemaphoreSlim> _voiceSelectionGates = new();
     private readonly SemaphoreSlim _clanJoinGate = new(1, 1);
     private IReadOnlyList<KnownClan> _knownClans = Array.Empty<KnownClan>();
@@ -193,6 +195,8 @@ public sealed partial class MonzeBot : BackgroundService
         _welcomeIngress = new PartitionedIngressQueue<WelcomeIngressItem>(WelcomePartitions, 1024);
     }
 
+    private OutcomeTimeout NewOutcomeTimeout() => new(_runtimeToken, _timings.UncertainMarkTimeout, _time);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await _readiness.Ready.WaitAsync(stoppingToken);
@@ -227,6 +231,7 @@ public sealed partial class MonzeBot : BackgroundService
         var messageWorker = ConsumeMessagesAsync(runtimeToken);
         var messageGapWorker = ConsumeMessageGapsAsync(runtimeToken);
         var agentWorker = ConsumeAgentEventsAsync(client, runtimeToken);
+        var summaryWorker = ConsumeSummaryFetchesAsync(runtimeToken);
         var welcomeWorker = ConsumeWelcomeAsync(client, runtimeToken);
         var roleWorker = Task.CompletedTask;
         var outboxWorker = Task.CompletedTask;
@@ -292,6 +297,7 @@ public sealed partial class MonzeBot : BackgroundService
 
             _messageIngress.Complete();
             _meetingIngress.Writer.TryComplete();
+            _summaryFetches.Writer.TryComplete();
             _welcomeIngress.Complete();
             try
             {
@@ -299,6 +305,7 @@ public sealed partial class MonzeBot : BackgroundService
                     messageWorker,
                     messageGapWorker,
                     agentWorker,
+                    summaryWorker,
                     welcomeWorker,
                     roleWorker,
                     outboxWorker);

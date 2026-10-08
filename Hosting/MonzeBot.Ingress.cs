@@ -60,7 +60,7 @@ public sealed partial class MonzeBot
     {
         var pending = new MessageGapBatch(256);
         var reader = _messageGapIngress.Reader;
-        while (await reader.WaitToReadAsync(cancellationToken))
+        while (!_overflowedGaps.IsEmpty || await reader.WaitToReadAsync(cancellationToken))
         {
             pending.Clear();
             while (pending.Count < 256 && reader.TryRead(out var item))
@@ -68,6 +68,8 @@ public sealed partial class MonzeBot
                 Interlocked.Decrement(ref _messageGapIngressDepth);
                 pending.Add(item.ClanId, item.ChannelId, item.MessageId);
             }
+
+            TakeOverflowedGaps(pending, 256);
 
             try
             {
@@ -104,8 +106,35 @@ public sealed partial class MonzeBot
             return;
         }
 
+        // The gap queue is full: keep one marker per channel aside instead of
+        // dropping it, so the channel's has_gap is still set once the queue
+        // drains (WF-07). Only beyond MessageGapOverflowLimit channels is a
+        // marker dropped.
+        var key = new ChannelPolicyKey(clanId, channelId);
+        if (_overflowedGaps.Count < MessageGapOverflowLimit || _overflowedGaps.ContainsKey(key))
+        {
+            _overflowedGaps.AddOrUpdate(key, static (_, latest) => latest, static (_, current, latest) => Math.Max(current, latest), messageId);
+            return;
+        }
+
         Interlocked.Increment(ref _droppedMessageGaps);
         MonzeMetrics.MessageGapIngressDropped.Add(1);
+    }
+
+    private void TakeOverflowedGaps(MessageGapBatch batch, int capacity)
+    {
+        foreach (var key in _overflowedGaps.Keys)
+        {
+            if (batch.Count >= capacity)
+            {
+                return;
+            }
+
+            if (_overflowedGaps.TryRemove(key, out var messageId))
+            {
+                batch.Add(key.ClanId, key.ChannelId, messageId);
+            }
+        }
     }
 
     private async Task MarkMessageGapAsync(
@@ -214,6 +243,8 @@ public sealed partial class MonzeBot
             Interlocked.Decrement(ref _messageGapIngressDepth);
             pending.Add(gap.ClanId, gap.ChannelId, gap.MessageId);
         }
+
+        TakeOverflowedGaps(pending, int.MaxValue);
 
         foreach (var item in pending.Entries)
         {
