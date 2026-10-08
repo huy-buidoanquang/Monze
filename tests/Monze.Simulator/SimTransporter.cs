@@ -337,7 +337,13 @@ public sealed partial class SimTransporter : IMezonNetworkTransporter
     private void Run(Connection connection, string operation, Func<SimFault?, Reply> handle)
     {
         var (delay, terminal) = _simulator.Faults.TakeOperation(operation);
-        if (delay is null)
+        var wait = delay?.Delay ?? TimeSpan.Zero;
+        if (operation != SimOperations.Heartbeat && _simulator.Options.ResponseLatency is { } latency)
+        {
+            wait += latency(operation);
+        }
+
+        if (wait <= TimeSpan.Zero)
         {
             RunNow(connection, operation, terminal, handle);
             return;
@@ -345,7 +351,7 @@ public sealed partial class SimTransporter : IMezonNetworkTransporter
 
         _ = Task.Run(async () =>
         {
-            await Task.Delay(delay.Delay).ConfigureAwait(false);
+            await Task.Delay(wait).ConfigureAwait(false);
             try
             {
                 RunNow(connection, operation, terminal, handle);

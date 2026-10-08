@@ -26,6 +26,21 @@ public sealed class MezonSimulatorOptions
     /// <summary>Overrides MezonOptions.SocketTimeoutInMilliseconds when set (dropped-ack tests).</summary>
     public int? SocketTimeoutMilliseconds { get; init; }
 
+    /// <summary>
+    /// Keep the client-side transport rate limits Monze configured (the
+    /// production behaviour, load variant V1) instead of raising them so they
+    /// never delay a test.
+    /// </summary>
+    public bool KeepClientRateLimits { get; init; }
+
+    /// <summary>
+    /// Extra time before the platform answers a socket API call or realtime
+    /// envelope (not heartbeats), e.g. a log-normal ack latency for load
+    /// variant V3L. Called once per request; Windows timers round it up to
+    /// about 15 ms steps.
+    /// </summary>
+    public Func<string, TimeSpan>? ResponseLatency { get; init; }
+
     /// <summary>Lifetime of issued session tokens.</summary>
     public TimeSpan SessionLifetime { get; init; } = TimeSpan.FromHours(24);
 

@@ -134,9 +134,13 @@ public sealed class MezonSimulator : IAsyncDisposable
         options.ZkApiUrl = string.Empty;
         options.RestClientProvider = baseUrl => new SimRestClient(this, baseUrl);
         options.NetworkTransportProvider = CreateTransporter;
-        options.MaxTransportRequestsPerSecond = TransportRequestsPerSecond;
-        options.MaxTransportRequestsPerMinute = TransportRequestsPerMinute;
-        options.MaxConnectRequestsPerSecond = TransportRequestsPerSecond;
+        if (!Options.KeepClientRateLimits)
+        {
+            options.MaxTransportRequestsPerSecond = TransportRequestsPerSecond;
+            options.MaxTransportRequestsPerMinute = TransportRequestsPerMinute;
+            options.MaxConnectRequestsPerSecond = TransportRequestsPerSecond;
+        }
+
         if (Options.HeartbeatIntervalMilliseconds is int heartbeat)
         {
             options.HeartbeatIntervalInMilliseconds = heartbeat;

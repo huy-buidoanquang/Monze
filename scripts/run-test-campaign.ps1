@@ -49,7 +49,7 @@ Set-Location $repo
 $profileName = if ($Full -and $Soak) { 'full-soak' } elseif ($Full) { 'full' } elseif ($Deep) { 'deep' } elseif ($Soak) { 'soak' } else { 'quick' }
 $allTiers = @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'component', 'load', 'k6', 'capacity', 'chaos', 'soak', 'live')
 # Tiers whose runners exist in this revision. Later commits add to this list.
-$implemented = @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'component')
+$implemented = @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'component', 'load', 'k6')
 $profileTiers = switch ($profileName) {
     'quick' { @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'component', 'load', 'capacity', 'chaos') }
     'deep' { @('build', 'inventory', 'unit', 'property', 'integration', 'e2e') }
@@ -163,19 +163,19 @@ function Invoke-TestTier {
     return @{ Status = $status; Note = $note; Exit = $run.ExitCode; Command = $run.Command; Seconds = $watch.Elapsed.TotalSeconds }
 }
 
-function Invoke-ComponentTier {
-    param([int]$TimeoutMinutes)
-    # Component scenarios run one after another on an otherwise idle machine
-    # and write one monze.artifact.v1 file each to raw/component/.
-    $arguments = @((Join-Path $repo 'tests/Monze.Campaign/bin/Release/net10.0/Monze.Campaign.dll'), 'component', '--artifacts', $raw)
+function Invoke-RunnerTier {
+    param([string]$Tier, [int]$TimeoutMinutes)
+    # Monze.Campaign scenarios (component, load) run one after another on an
+    # otherwise idle machine and write one monze.artifact.v1 file each to raw/<tier>/.
+    $arguments = @((Join-Path $repo 'tests/Monze.Campaign/bin/Release/net10.0/Monze.Campaign.dll'), $Tier, '--artifacts', $raw)
     if ($profileName -ne 'quick') { $arguments += '--full' }
     $watch = [Diagnostics.Stopwatch]::StartNew()
-    $run = Invoke-Logged -Name 'component' -File 'dotnet' -Arguments $arguments -TimeoutMinutes $TimeoutMinutes
+    $run = Invoke-Logged -Name $Tier -File 'dotnet' -Arguments $arguments -TimeoutMinutes $TimeoutMinutes
     $watch.Stop()
-    $results = @(Get-ChildItem -Path (Join-Path $raw 'component') -Filter '*.json' -ErrorAction SilentlyContinue |
+    $results = @(Get-ChildItem -Path (Join-Path $raw $Tier) -Filter '*.json' -ErrorAction SilentlyContinue |
         ForEach-Object { Get-Content -Raw $_.FullName | ConvertFrom-Json })
     if ($run.TimedOut) { return @{ Status = 'TIMEOUT'; Note = "Quá $TimeoutMinutes phút"; Exit = $null; Command = $run.Command; Seconds = $watch.Elapsed.TotalSeconds } }
-    if ($results.Count -eq 0) { return @{ Status = 'ERROR'; Note = 'Không có artifact component (xem raw/logs/component*.log)'; Exit = $run.ExitCode; Command = $run.Command; Seconds = $watch.Elapsed.TotalSeconds } }
+    if ($results.Count -eq 0) { return @{ Status = 'ERROR'; Note = "Không có artifact $Tier (xem raw/logs/$Tier*.log)"; Exit = $run.ExitCode; Command = $run.Command; Seconds = $watch.Elapsed.TotalSeconds } }
     # A KNOWN_GAP reproduces a registered defect, like an xfail; a gap that no
     # longer reproduces fails the tier until its expectation is updated.
     $failed = @($results | Where-Object { $_.verdict -notin 'PASS', 'KNOWN_GAP', 'BLOCKED' })
@@ -308,7 +308,7 @@ try {
     Add-Tier 'preflight' 'PASS' $watch.Elapsed.TotalSeconds 0 $null (($preflightNotes + @("branch $branch")) -join '; ')
 
     # ------------------------------------------------------------ containers (start while building)
-    $needsDb = @($requested | Where-Object { $_ -in 'integration', 'e2e', 'component' }).Count -gt 0
+    $needsDb = @($requested | Where-Object { $_ -in 'integration', 'e2e', 'component', 'load', 'k6' }).Count -gt 0
     if ($needsDb) {
         $null = Start-CampaignPostgres 'pg17' 'postgres:17-alpine' 55432 $secrets.postgres 'monze_t_integration'
         $null = Start-CampaignPostgres 'pg16' 'postgres:16' 55433 $secrets.postgres 'monze_t_integration'
@@ -389,10 +389,29 @@ try {
                 $env:MONZE_TEST_POSTGRES_ALT = "Host=127.0.0.1;Port=55433;Database=monze_t_integration;Username=monze;Password=$($secrets.postgres)"
                 $env:MONZE_REDIS_CONNECTION = "127.0.0.1:56379,password=$($secrets.redis)"
                 try {
-                    $result = Invoke-ComponentTier -TimeoutMinutes $(if ($profileName -eq 'quick') { 10 } else { 45 })
+                    $result = Invoke-RunnerTier -Tier 'component' -TimeoutMinutes $(if ($profileName -eq 'quick') { 10 } else { 45 })
                 }
                 finally {
                     Remove-Item Env:MONZE_TEST_POSTGRES, Env:MONZE_TEST_POSTGRES_ALT, Env:MONZE_REDIS_CONNECTION -ErrorAction SilentlyContinue
+                }
+            }
+            'load' {
+                $env:MONZE_TEST_POSTGRES = "Host=127.0.0.1;Port=55432;Database=monze_t_integration;Username=monze;Password=$($secrets.postgres)"
+                try {
+                    $result = Invoke-RunnerTier -Tier 'load' -TimeoutMinutes $(if ($profileName -eq 'quick') { 15 } else { 150 })
+                }
+                finally {
+                    Remove-Item Env:MONZE_TEST_POSTGRES -ErrorAction SilentlyContinue
+                }
+            }
+            'k6' {
+                # The runner finds k6 on PATH or in its default install folder; without it the tier is BLOCKED.
+                $env:MONZE_TEST_POSTGRES = "Host=127.0.0.1;Port=55432;Database=monze_t_integration;Username=monze;Password=$($secrets.postgres)"
+                try {
+                    $result = Invoke-RunnerTier -Tier 'k6' -TimeoutMinutes 15
+                }
+                finally {
+                    Remove-Item Env:MONZE_TEST_POSTGRES -ErrorAction SilentlyContinue
                 }
             }
             'micro' {

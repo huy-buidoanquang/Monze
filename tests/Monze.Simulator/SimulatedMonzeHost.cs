@@ -250,14 +250,19 @@ public sealed class SimulatedMonzeHost : IAsyncDisposable
         }
 
         await ready;
-        await timeout.CancelAsync();
-        foreach (var clan in World.ClansOf(World.Bot.Id))
+
+        // Clan joins can still be in flight when the refresh is logged (slow acks).
+        while (World.ClansOf(World.Bot.Id).FirstOrDefault(clan => !Simulator.ConnectedSessions.Any(session => session.HasJoinedClan(clan.Id))) is { } missing)
         {
-            if (!Simulator.ConnectedSessions.Any(session => session.HasJoinedClan(clan.Id)))
+            if (timeout.IsCancellationRequested)
             {
-                throw new InvalidOperationException($"Monze is ready but no session joined clan {clan.Id}.{Environment.NewLine}{Recorder.Describe()}");
+                throw new InvalidOperationException($"Monze is ready but no session joined clan {missing.Id}.{Environment.NewLine}{Recorder.Describe()}");
             }
+
+            await Task.Delay(50);
         }
+
+        await timeout.CancelAsync();
     }
 
     private static Dictionary<string, string?> Configuration(

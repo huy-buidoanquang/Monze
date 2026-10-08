@@ -8,7 +8,9 @@ namespace Monze.Simulator;
 /// updates, deletes, role changes, clan joins, API reads), interleaved with
 /// the platform pushes it received. Tests await expected actions with
 /// <see cref="WaitForAsync"/> and assert <see cref="UnmodelledCalls"/> and
-/// <see cref="ProtocolViolations"/> are empty.
+/// <see cref="ProtocolViolations"/> are empty. Load runs observe actions as
+/// they happen through <see cref="Recorded"/> and bound the kept log with
+/// <see cref="RetainLimit"/>.
 /// </summary>
 public sealed class SimRecorder
 {
@@ -26,6 +28,12 @@ public sealed class SimRecorder
         _time = time ?? TimeProvider.System;
         _lastOutboundTicks = _time.GetTimestamp();
     }
+
+    /// <summary>Raised on the recording thread after each entry; keep handlers cheap and non-throwing.</summary>
+    public event Action<SimAction>? Recorded;
+
+    /// <summary>When set, only about the last this-many entries are kept (sequences keep counting).</summary>
+    public int? RetainLimit { get; set; }
 
     /// <summary>Snapshot of the whole log.</summary>
     public IReadOnlyList<SimAction> Actions
@@ -194,6 +202,10 @@ public sealed class SimRecorder
         {
             action = draft with { Sequence = Interlocked.Increment(ref _sequence), At = _time.GetUtcNow() };
             _actions.Add(action);
+            if (RetainLimit is int limit && _actions.Count > 2 * limit)
+            {
+                _actions.RemoveRange(0, _actions.Count - limit);
+            }
             if (action.IsOutbound && action.Kind != SimActionKind.Heartbeat)
             {
                 Interlocked.Exchange(ref _lastOutboundTicks, _time.GetTimestamp());
@@ -228,6 +240,7 @@ public sealed class SimRecorder
             }
         }
 
+        Recorded?.Invoke(action);
         return action;
     }
 
