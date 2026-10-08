@@ -30,5 +30,19 @@ public sealed class PostgresAiUsageRepository : IAiUsageRepository
         return value is null ? (false, 0) : (true, (int)value);
     }
 
+    public async Task RefundAiAsync(long clanId, long userId, int tokens, CancellationToken cancellationToken)
+    {
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var refund = new NpgsqlCommand("""
+            UPDATE ai_usage
+            SET tokens = GREATEST(0, tokens - @tokens)
+            WHERE clan_id = @clan AND user_id = @user AND usage_day = CURRENT_DATE;
+            """, connection);
+        refund.Parameters.AddWithValue("clan", clanId);
+        refund.Parameters.AddWithValue("user", userId);
+        refund.Parameters.AddWithValue("tokens", Math.Max(1, tokens));
+        await refund.ExecuteNonQueryAsync(cancellationToken);
+    }
+
 }
 

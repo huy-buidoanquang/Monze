@@ -347,6 +347,30 @@ public sealed partial class PostgresMeetingRepository : IMeetingRepository
                 MeetingStatus.Live);
         }
 
+        if (!matchedExistingRoom)
+        {
+            // The Agent started a new room in this voice channel, so any other
+            // session still live here lost its room_ended: end it like room_ended
+            // would, so its summary is fetched and one room has one live session (DEF-12).
+            await using var endStale = new NpgsqlCommand("""
+                UPDATE meeting_session
+                SET status = 'summary_pending',
+                    ended_at = COALESCE(ended_at, now()),
+                    summary_next_attempt_at = COALESCE(summary_next_attempt_at, now()),
+                    summary_last_error = NULL,
+                    summary_locked_until = NULL,
+                    summary_lease_token = NULL
+                WHERE clan_id = @clan
+                  AND voice_channel_id = @voice
+                  AND status = 'live'
+                  AND id <> @session;
+                """, connection, transaction);
+            endStale.Parameters.AddWithValue("clan", clanId);
+            endStale.Parameters.AddWithValue("voice", voiceChannelId);
+            endStale.Parameters.AddWithValue("session", binding.SessionId);
+            await endStale.ExecuteNonQueryAsync(cancellationToken);
+        }
+
         var hasPendingAgentCompletion = false;
         await using (var pending = new NpgsqlCommand("""
             DELETE FROM agent_event

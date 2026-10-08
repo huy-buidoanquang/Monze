@@ -28,6 +28,7 @@ public static class AgentSummaryParser
             }
             else if (root.ValueKind == JsonValueKind.Object
                 && root.TryGetProperty("status", out var status)
+                && status.ValueKind == JsonValueKind.String
                 && string.Equals(status.GetString(), "ok", StringComparison.OrdinalIgnoreCase)
                 && root.TryGetProperty("data", out var data))
             {
@@ -85,13 +86,17 @@ public static class AgentSummaryParser
         return default;
     }
 
+    // Elements of an unexpected kind (a number where an object belongs) are
+    // skipped like missing ones instead of throwing (CAND-11).
     private static bool HasRoomId(JsonElement element, string roomId)
-        => element.TryGetProperty("room_id", out var value)
+        => element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty("room_id", out var value)
             && value.ValueKind == JsonValueKind.String
             && string.Equals(value.GetString(), roomId, StringComparison.Ordinal);
 
     private static string? ReadString(JsonElement element, string propertyName)
-        => element.TryGetProperty(propertyName, out var value)
+        => element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty(propertyName, out var value)
             && value.ValueKind == JsonValueKind.String
             && !string.IsNullOrWhiteSpace(value.GetString())
             ? value.GetString()
@@ -197,7 +202,7 @@ public static class AgentSummaryParser
 
     private static bool TryReadDouble(JsonElement element, string propertyName, out double value)
     {
-        if (element.TryGetProperty(propertyName, out var property))
+        if (element.ValueKind == JsonValueKind.Object && element.TryGetProperty(propertyName, out var property))
         {
             if (property.ValueKind == JsonValueKind.Number && property.TryGetDouble(out value))
             {

@@ -22,8 +22,8 @@ namespace Monze.Tests.Property.Ui;
 /// G25: OpenAiCompatibleProvider returns the first choice's content or null
 /// for every non-success shape, sends the model and both messages with the
 /// bearer key, and never writes the key, the instruction or the input to logs.
-/// Known gap CAND-14: a JSON array root or a non-object choice throws
-/// InvalidOperationException instead of returning null.
+/// A JSON array root or a non-object choice returns null too (regression for
+/// CAND-14: it used to throw InvalidOperationException).
 /// G30: connection retry delays double from the clamped initial delay up to
 /// the clamped maximum; queue partitions round up to a power of two in 1..64.
 /// </summary>
@@ -99,15 +99,7 @@ public sealed class G24G25G30HttpAndRetryProperties
                 using var http = new HttpClient(handler);
                 var provider = new Monze.OpenAiCompatibleProvider(http, "https://ai.test/base", key, "model-test", logger);
                 var tags = new Dictionary<string, string> { ["shape"] = shape };
-                string? result;
-                try
-                {
-                    result = provider.CompleteAsync(instruction, input, CancellationToken.None).GetAwaiter().GetResult();
-                }
-                catch (InvalidOperationException ex) when (shape is "array-root" or "non-object-choice")
-                {
-                    return PropertyResult.Known("CAND-14", shape, tags, ex.Message);
-                }
+                var result = provider.CompleteAsync(instruction, input, CancellationToken.None).GetAwaiter().GetResult();
 
                 var expected = shape is "ok" or "ok-untyped" ? "trả lời" : null;
                 var leaks = logger.Text.Contains(key, StringComparison.Ordinal)
@@ -123,16 +115,10 @@ public sealed class G24G25G30HttpAndRetryProperties
                     && request.User == input;
                 var correct = result == expected && !leaks && requestOk;
                 var note = $"result={(result is null ? "null" : $"'{result}'")} leaks={leaks} request={requestOk}";
-                if (shape is "array-root" or "non-object-choice")
-                {
-                    return correct ? PropertyResult.Pass(shape, tags, "CAND-14") : PropertyResult.Fail(shape, tags, note);
-                }
-
                 return PropertyResult.Check(correct, shape, tags, () => note);
             },
             iterations: 6_000,
-            declare: static ledger => ledger.Dimension("shape", Shapes),
-            knownDefects: ["CAND-14"]);
+            declare: static ledger => ledger.Dimension("shape", Shapes));
     }
 
     [Fact]

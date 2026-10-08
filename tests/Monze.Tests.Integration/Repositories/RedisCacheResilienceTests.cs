@@ -11,9 +11,9 @@ namespace Monze.Tests.Repositories;
 /// <summary>
 /// Redis is only a cache: when it fails, reads return "miss" so callers fall
 /// back to PostgreSQL, and the cache stops calling Redis for the 5 s cooldown.
-/// Known gap DEF-01: a RedisTimeoutException is a TimeoutException, not a
-/// RedisException, so a slow Redis escapes the fallback and never starts the
-/// cooldown.
+/// A RedisTimeoutException (a TimeoutException, not a RedisException) is a
+/// failure too (regression for DEF-01: a slow Redis used to escape the
+/// fallback and never start the cooldown).
 /// </summary>
 [Collection(RedisCollection.Name)]
 public sealed class RedisCacheResilienceTests
@@ -54,13 +54,11 @@ public sealed class RedisCacheResilienceTests
         await server.ExecuteAsync("CLIENT", "PAUSE", "2500", "ALL");
         try
         {
-            await KnownDefect.ExpectFailureAsync("DEF-01", async () =>
-            {
-                Assert.Null(await cache.GetAsync(1, "settings", "a", CancellationToken.None));
-                var watch = Stopwatch.StartNew();
-                Assert.Null(await cache.GetAsync(1, "settings", "b", CancellationToken.None));
-                Assert.True(watch.ElapsedMilliseconds < 500, $"second read took {watch.ElapsedMilliseconds} ms");
-            });
+            // Regression for DEF-01: a timeout is a Redis failure, so the cooldown starts.
+            Assert.Null(await cache.GetAsync(1, "settings", "a", CancellationToken.None));
+            var watch = Stopwatch.StartNew();
+            Assert.Null(await cache.GetAsync(1, "settings", "b", CancellationToken.None));
+            Assert.True(watch.ElapsedMilliseconds < 500, $"second read took {watch.ElapsedMilliseconds} ms");
         }
         finally
         {

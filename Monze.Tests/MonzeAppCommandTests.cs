@@ -480,6 +480,30 @@ public sealed class MonzeAppCommandTests
         Assert.Equal(0, dependencies.AiProviderCalls);
     }
 
+    /// <summary>Regression for CAND-05: a request the provider does not answer gives its tokens back.</summary>
+    [Fact]
+    [Req("REQ-AI-001")]
+    [Covers("port:IAiUsageRepository.RefundAiAsync")]
+    public async Task Ai_refunds_the_budget_when_the_provider_gives_no_answer()
+    {
+        var dependencies = new MonzeAppTestDependencies { AiResponse = null };
+        var app = dependencies.CreateApp(withAi: true);
+
+        var failed = await app.HandleMonzeAsync(ClanId, ChannelId, UserId, ["ai", "translate", "hello world"], CancellationToken.None);
+
+        Assert.Equal(MonzeMessages.AiProviderEmpty, Assert.Single(failed.Fields!).Value);
+        Assert.Equal((ClanId, UserId, 3), Assert.Single(dependencies.AiRefunds));
+
+        dependencies.AiHandler = static (_, _, _) => throw new HttpRequestException("down");
+        await Assert.ThrowsAsync<HttpRequestException>(() => app.HandleMonzeAsync(ClanId, ChannelId, UserId, ["ai", "translate", "hello world"], CancellationToken.None));
+        Assert.Equal(2, dependencies.AiRefunds.Count);
+
+        dependencies.AiHandler = null;
+        dependencies.AiResponse = "xin chào";
+        await app.HandleMonzeAsync(ClanId, ChannelId, UserId, ["ai", "translate", "hello world"], CancellationToken.None);
+        Assert.Equal(2, dependencies.AiRefunds.Count);
+    }
+
     [Fact]
     public async Task Ai_summary_combines_history_reports_gap_and_releases_concurrency_slot()
     {

@@ -119,14 +119,13 @@ public sealed class AgentSseWorkflowTests
         await http.PublishAgentEventAsync("room_started", "sim-room-wrong-clan", VoiceId, OtherClanId);
         await http.PublishAgentEventAsync("room_started", "sim-room-text-channel", GeneralId, ClanId);
 
-        // Valid JSON that is not an object (CAND-01, G17): AgentEventPayload.TryParse
-        // only catches JsonException, so the ingress worker logs a warning with
-        // an InvalidOperationException for each (and carries on).
+        // Valid JSON that is not an object is ignored like any payload without
+        // fields (regression for CAND-01: the ingress worker used to log a
+        // warning with an InvalidOperationException for each).
         await http.PublishJsonAsync("room_started", "[1,2]");
         await http.PublishJsonAsync("room_ended", "\"room\"");
         await host.Recorder.WaitForQuietAsync(TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(5));
-        await E2EOracles.AssertAsync(host, phaseJunk, new ScenarioExpectation { Unauthorized = true, AllowedWarnings = ["Agent event worker failed."] });
-        KnownDefect.ExpectFailure("CAND-01", () => Assert.DoesNotContain(host.Logs.Entries, static entry => entry.Message.StartsWith("Agent event worker failed", StringComparison.Ordinal)));
+        await E2EOracles.AssertAsync(host, phaseJunk, new ScenarioExpectation { Unauthorized = true });
 
         // Room B after the junk: started arrives twice; the stream is still healthy.
         var phaseB = await E2EOracles.MarkAsync(host);
@@ -135,6 +134,9 @@ public sealed class AgentSseWorkflowTests
         await MeetingAgentWorkflowTests.WaitForStatusAsync(host, roomB, "live");
         await host.Recorder.WaitForQuietAsync(TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(5));
         await E2EOracles.AssertAsync(host, phaseB, new ScenarioExpectation { OtherOutputs = 1 });
+
+        // Room B went live after the junk in the same ingress order, so the junk was handled.
+        Assert.DoesNotContain(host.Logs.Entries, static entry => entry.Message.StartsWith("Agent event worker failed", StringComparison.Ordinal));
         Assert.Equal(1L, await host.ScalarAsync<long>("SELECT count(*) FROM meeting_session WHERE room_id = @room;", ("room", roomB)));
         Assert.Equal(1, http.SseConnections);
         Assert.Equal(0L, await host.ScalarAsync<long>("SELECT count(*) FROM meeting_session WHERE room_id LIKE 'sim-room-%clan' OR room_id = 'sim-room-text-channel';"));

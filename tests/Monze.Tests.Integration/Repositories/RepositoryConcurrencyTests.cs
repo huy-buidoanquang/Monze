@@ -206,6 +206,27 @@ public sealed class RepositoryConcurrencyTests
         });
     }
 
+    /// <summary>Regression for CAND-05: unanswered requests give their tokens back, never below zero.</summary>
+    [DbFact]
+    [Req("REQ-AI-001")]
+    [Covers("port:IAiUsageRepository.RefundAiAsync")]
+    public async Task Ai_refund_gives_tokens_back_without_going_below_zero()
+    {
+        await using var db = await AuditedDatabase.CreateAsync("ai_refund");
+        var repository = new PostgresAiUsageRepository(db.DataSource);
+        Assert.Equal((true, 8), await repository.ConsumeAiAsync(ClanBase, 77, 8, 10, CancellationToken.None));
+        Assert.False((await repository.ConsumeAiAsync(ClanBase, 77, 5, 10, CancellationToken.None)).Allowed);
+
+        await repository.RefundAiAsync(ClanBase, 77, 5, CancellationToken.None);
+        Assert.Equal((true, 8), await repository.ConsumeAiAsync(ClanBase, 77, 5, 10, CancellationToken.None));
+        await repository.RefundAiAsync(ClanBase, 77, 100, CancellationToken.None);
+        await repository.RefundAiAsync(ClanBase, 78, 5, CancellationToken.None);
+
+        Assert.Equal(0, await db.CountAsync("SELECT tokens FROM ai_usage WHERE clan_id = @clan AND user_id = 77;", ("clan", ClanBase)));
+        Assert.Equal(0, await db.CountAsync("SELECT count(*) FROM ai_usage WHERE clan_id = @clan AND user_id = 78;", ("clan", ClanBase)));
+        await db.AssertTransitionsAsync();
+    }
+
     [DbFact]
     [Req("REQ-INBOX-001")]
     [Covers("port:ICommandInboxRepository.TryClaimAsync")]

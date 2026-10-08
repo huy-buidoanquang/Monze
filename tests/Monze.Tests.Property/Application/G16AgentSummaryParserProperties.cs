@@ -14,9 +14,9 @@ namespace Monze.Tests.Property.Application;
 /// (direct, ok + object, ok + array, wrong status, non-object root, invalid
 /// JSON), the summary text, full text, timestamps, participants, speech
 /// durations and action items (trimmed, blanks and negatives skipped).
-/// Known gap CAND-11: elements of an unexpected JSON kind (a non-string status,
-/// a number in data/participants/speech_durations) throw
-/// InvalidOperationException instead of being rejected or skipped.
+/// Elements of an unexpected JSON kind (a non-string status, a number in
+/// data/participants/speech_durations) are rejected or skipped (regression
+/// for CAND-11: they used to throw InvalidOperationException).
 /// </summary>
 public sealed class G16AgentSummaryParserProperties
 {
@@ -76,26 +76,8 @@ public sealed class G16AgentSummaryParserProperties
                     ["shape"] = item.UnexpectedKinds ? "unexpected-kinds" : "regular"
                 };
                 var input = $"{item.Envelope}: {Truncate(item.Json)}";
-                bool accepted;
-                AgentSummaryResult? result;
-                try
-                {
-                    accepted = AgentSummaryParser.TryParse(item.Json, Room, out var parsed);
-                    result = accepted ? parsed : null;
-                }
-                catch (InvalidOperationException ex) when (item.UnexpectedKinds)
-                {
-                    return PropertyResult.Known("CAND-11", input, tags, ex.Message);
-                }
-
-                var difference = Compare(item.Expected, result);
-                if (item.UnexpectedKinds)
-                {
-                    return difference is null
-                        ? PropertyResult.Pass(input, tags, "CAND-11")
-                        : PropertyResult.Fail(input, tags, difference);
-                }
-
+                var accepted = AgentSummaryParser.TryParse(item.Json, Room, out var parsed);
+                var difference = Compare(item.Expected, accepted ? parsed : null);
                 return difference is null ? PropertyResult.Pass(input, tags) : PropertyResult.Fail(input, tags, difference);
             },
             iterations: 40_000,
@@ -107,8 +89,7 @@ public sealed class G16AgentSummaryParserProperties
                 .Infeasible("envelope", "status-non-string", "valid", "accept")
                 .Infeasible("envelope", "array-root", "valid", "accept")
                 .Infeasible("envelope", "primitive-root", "valid", "accept")
-                .Infeasible("envelope", "invalid-json", "valid", "accept"),
-            knownDefects: ["CAND-11"]);
+                .Infeasible("envelope", "invalid-json", "valid", "accept"));
     }
 
     private static PayloadCase Build(string envelope, SummaryModel model, string statusCase, int others, bool nonObjectItems)

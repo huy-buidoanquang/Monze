@@ -302,6 +302,57 @@ public sealed class PostgresMeetingCycleTests
         }
     }
 
+    /// <summary>
+    /// Regression for DEF-12: a room that starts in a voice channel where
+    /// another room is still live (its room_ended was lost) ends the stale
+    /// session, so the voice channel has one live session and the stale one's
+    /// summary is fetched.
+    /// </summary>
+    [DbFact]
+    [Req("REQ-MTG-003")]
+    public async Task A_new_room_ends_a_live_session_whose_end_was_lost()
+    {
+        var connectionString = PostgresTestConfiguration.ReadConnectionString();
+        Assert.False(string.IsNullOrWhiteSpace(connectionString));
+        var suffix = Random.Shared.NextInt64(1, 1_000_000);
+        var clanId = -9_500_000_000_000_000L - suffix;
+        var voiceChannelId = clanId - 1;
+        var staleRoom = $"monze-lost-end:{Guid.NewGuid():N}";
+        var nextRoom = $"monze-after-lost-end:{Guid.NewGuid():N}";
+
+        await using var dataSource = NpgsqlDataSource.Create(connectionString!);
+        var repository = new PostgresMeetingRepository(dataSource);
+        try
+        {
+            Assert.NotNull(await repository.BindAgentSessionAsync(clanId, voiceChannelId, staleRoom, clanId - 2, CancellationToken.None, "voice-lost"));
+            var next = await repository.BindAgentSessionAsync(clanId, voiceChannelId, nextRoom, clanId - 2, CancellationToken.None, "voice-lost");
+
+            Assert.Equal(MeetingStatus.Live, next!.Status);
+            await using var connection = await dataSource.OpenConnectionAsync();
+            await using var statuses = new NpgsqlCommand(
+                "SELECT room_id, status, ended_at IS NOT NULL, summary_next_attempt_at IS NOT NULL FROM meeting_session WHERE clan_id = @clan ORDER BY id;",
+                connection);
+            statuses.Parameters.AddWithValue("clan", clanId);
+            var rows = new List<(string Room, string Status, bool Ended, bool SummaryDue)>();
+            await using (var reader = await statuses.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    rows.Add((reader.GetString(0), reader.GetString(1), reader.GetBoolean(2), reader.GetBoolean(3)));
+                }
+            }
+
+            Assert.Equal(
+                new[] { (staleRoom, "summary_pending", true, true), (nextRoom, "live", false, false) },
+                rows);
+        }
+        finally
+        {
+            await CleanupRoomAsync(dataSource, nextRoom);
+            await CleanupRoomAsync(dataSource, staleRoom);
+        }
+    }
+
     [DbFact]
     public async Task Repeated_agent_cycles_keep_one_invitation_and_create_distinct_summaries()
     {

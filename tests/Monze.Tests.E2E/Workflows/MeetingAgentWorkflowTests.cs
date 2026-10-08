@@ -137,17 +137,16 @@ public sealed class MeetingAgentWorkflowTests
     }
 
     /// <summary>
-    /// DEF-12 (pre-registered): when room_ended never arrives, nothing moves
-    /// the session out of 'live'. ExpireSuggestedAsync only expires suggested
-    /// and requested sessions, the voice room emptying only closes the
-    /// context and drops the claim (PostgresMeetingRepository.Context.cs
-    /// CloseMeetingContextAsync), and summaries start only from room_ended or
-    /// room_summary_done (Features/Meeting/MonzeBot.Agent.cs). The next Agent
-    /// cycle in that room then opens a second live session.
+    /// Regression for DEF-12: when room_ended never arrives, nothing used to
+    /// move the session out of 'live' (ExpireSuggestedAsync only expires
+    /// suggested and requested sessions, and the voice room emptying only
+    /// closes the context), so the next Agent cycle in that room opened a
+    /// second live session. A new room in the voice channel now ends the
+    /// stale live session (summary_pending, its summary is fetched).
     /// </summary>
     [DbFact]
     [Req("REQ-MTG-003", "REQ-MTG-006")]
-    public async Task A_lost_room_ended_leaves_the_session_live_DEF_12()
+    public async Task A_lost_room_ended_is_closed_by_the_next_agent_cycle()
     {
         await using var http = await E2EActions.HttpAsync();
         await using var host = await E2EActions.StartAsync("wf_meeting_lost_end", http: http);
@@ -176,14 +175,8 @@ public sealed class MeetingAgentWorkflowTests
         await WaitForStatusAsync(host, next, "live");
         await host.Inbound.VoiceLeaveAsync(ClanId, VoiceId, MemberId);
 
-        await KnownDefect.ExpectFailureAsync("DEF-12", async () =>
-        {
-            Assert.NotEqual("live", await host.ScalarAsync<string>("SELECT status FROM meeting_session WHERE room_id = @room;", ("room", room)));
-            await E2EOracles.AssertInvariantsAsync(host);
-        });
-
-        // What the defect looks like today: both sessions are live in one room.
-        Assert.Equal(2L, await host.ScalarAsync<long>(
+        Assert.Equal("summary_pending", await host.ScalarAsync<string>("SELECT status FROM meeting_session WHERE room_id = @room;", ("room", room)));
+        Assert.Equal(1L, await host.ScalarAsync<long>(
             "SELECT count(*) FROM meeting_session WHERE clan_id = @clan AND voice_channel_id = @voice AND status = 'live';",
             ("clan", ClanId),
             ("voice", VoiceId)));
@@ -191,7 +184,7 @@ public sealed class MeetingAgentWorkflowTests
         // Outputs: the status edit of the invitation (cycle 1) and the new
         // direct session's own status message in the voice room's text.
         await E2EOracles.AssertAsync(host, phase, new ScenarioExpectation { OtherOutputs = 2 });
-        await E2EOracles.AssertInvariantsAsync(host, expected: "meeting.live-per-voice");
+        await E2EOracles.AssertInvariantsAsync(host);
     }
 
     /// <summary>"*meeting now" with the voice room free: one public invitation, one suggested session.</summary>

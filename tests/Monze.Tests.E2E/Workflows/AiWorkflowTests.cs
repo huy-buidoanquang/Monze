@@ -49,15 +49,15 @@ public sealed class AiWorkflowTests
     }
 
     /// <summary>
-    /// CAND-05: MonzeApp.CompleteAiAsync (Monze.Application/Features/Ai/MonzeApp.Ai.cs)
-    /// consumes the estimated tokens with ConsumeAiAsync before calling the
-    /// provider and has no refund path, so every failed call below still
-    /// spends the user's daily budget.
+    /// Regression for CAND-05: MonzeApp.CompleteAiAsync
+    /// (Monze.Application/Features/Ai/MonzeApp.Ai.cs) consumes the estimated
+    /// tokens before calling the provider and used to keep them when the
+    /// provider gave no answer. Every failed call below now refunds them.
     /// </summary>
     [DbFact]
     [Req("REQ-AI-001")]
     [Covers("msg:AiProviderEmpty")]
-    public async Task Provider_failures_answer_provider_empty_and_keep_the_budget_spent_CAND_05()
+    public async Task Provider_failures_answer_provider_empty_and_refund_the_budget()
     {
         await using var http = await E2EActions.HttpAsync();
         await using var host = await E2EActions.StartAsync(
@@ -79,12 +79,10 @@ public sealed class AiWorkflowTests
 
         var mark = await E2EOracles.MarkAsync(host);
         var inputs = new List<InputExpectation>();
-        var spent = 0;
         foreach (var (name, fault) in failures)
         {
             fault(http.Faults);
             var text = $"nội dung lỗi {name}";
-            spent += (text.Length + 3) / 4;
             var command = await E2EActions.CommandAsync(host, GeneralId, MemberId, "*ai simplify " + text);
             inputs.Add(new(command, ResponseKind.EditedReply));
             Assert.Contains(MonzeMessages.AiProviderEmpty, E2EContent.Visible(LastEdit(host, command)));
@@ -98,8 +96,7 @@ public sealed class AiWorkflowTests
         Assert.Empty(http.Faults.Pending);
         Assert.Equal(failures.Length, http.Requests.Count(static request => request.Route == SimHttpRoute.AiCompletion));
         var used = await host.ScalarAsync<int>("SELECT tokens FROM ai_usage WHERE clan_id = @clan AND user_id = @user;", ("clan", ClanId), ("user", MemberId));
-        Assert.Equal(spent, used);
-        KnownDefect.ExpectFailure("CAND-05", () => Assert.Equal(0, used));
+        Assert.Equal(0, used);
         await E2EOracles.AssertInvariantsAsync(host);
     }
 

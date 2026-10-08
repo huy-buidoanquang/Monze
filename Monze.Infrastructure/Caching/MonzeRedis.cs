@@ -169,7 +169,7 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
                 new RedisKey[] { key },
                 new RedisValue[] { entry.Version, entry.Payload, Math.Max(1, (int)effectiveTtl.TotalSeconds) }).ConfigureAwait(false);
         }
-        catch (RedisException)
+        catch (Exception exception) when (IsRedisFailure(exception))
         {
             MarkRedisFailure();
             return false;
@@ -186,7 +186,7 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
         {
             await PublishInvalidationAsync(key, entry.Version).ConfigureAwait(false);
         }
-        catch (RedisException)
+        catch (Exception exception) when (IsRedisFailure(exception))
         {
             // The value is already committed. Pub/Sub is only a fast invalidation
             // path; TTL and the generation check remain the correctness boundary.
@@ -240,7 +240,7 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
                 new RedisKey[] { key },
                 new RedisValue[] { version, 30 }).ConfigureAwait(false);
         }
-        catch (RedisException)
+        catch (Exception exception) when (IsRedisFailure(exception))
         {
             MarkRedisFailure();
             return;
@@ -259,7 +259,7 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
         {
             await PublishInvalidationAsync(key, version).ConfigureAwait(false);
         }
-        catch (RedisException)
+        catch (Exception exception) when (IsRedisFailure(exception))
         {
             MarkRedisFailure();
         }
@@ -275,7 +275,7 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
                 RedisChannel.Literal(_prefix + InvalidationSuffix),
                 _invalidationHandler);
         }
-        catch (RedisException)
+        catch (Exception exception) when (IsRedisFailure(exception))
         {
             // Disposal must not turn an already degraded cache into a host shutdown failure.
         }
@@ -315,7 +315,7 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
         {
             value = await _database.StringGetAsync(key).ConfigureAwait(false);
         }
-        catch (RedisException)
+        catch (Exception exception) when (IsRedisFailure(exception))
         {
             MarkRedisFailure();
             return null;
@@ -392,7 +392,7 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
                 _invalidationHandler).ConfigureAwait(false);
             MarkRedisHealthy();
         }
-        catch (RedisException ex)
+        catch (Exception ex) when (IsRedisFailure(ex))
         {
             MarkRedisFailure();
             _logger.LogWarning(
@@ -400,6 +400,13 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
                 "Redis invalidation subscription unavailable; continuing with PostgreSQL fallback.");
         }
     }
+
+    /// <summary>
+    /// A failed Redis call: a RedisTimeoutException is a TimeoutException, not
+    /// a RedisException, and a slow Redis must start the cooldown too (DEF-01).
+    /// </summary>
+    private static bool IsRedisFailure(Exception exception)
+        => exception is RedisException or RedisTimeoutException;
 
     private void BumpGeneration(MonzeCacheKey key)
         => _generations.AddOrUpdate(key, 1, static (_, value) => unchecked(value + 1));

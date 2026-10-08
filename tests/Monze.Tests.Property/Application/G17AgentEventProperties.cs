@@ -17,8 +17,8 @@ namespace Monze.Tests.Property.Application;
 /// keeping only positive ids; AgentEventIdentity prefers event_id/eventId and
 /// otherwise hashes kind, type and payload; the scope policy accepts only voice
 /// channels of known clans whose payload clan, if any, matches.
-/// Known gap CAND-01: a JSON array or scalar root throws InvalidOperationException
-/// from both readers instead of being treated as a payload without fields.
+/// A JSON array or scalar root is a payload without fields (regression for
+/// CAND-01: both readers used to throw InvalidOperationException).
 /// </summary>
 public sealed class G17AgentEventProperties
 {
@@ -57,18 +57,8 @@ public sealed class G17AgentEventProperties
             {
                 var tags = new Dictionary<string, string> { ["root"] = item.Root, ["event-id"] = item.ExpectedEventId is null ? "absent" : "present" };
                 var input = item.Json.Length <= 160 ? item.Json : item.Json[..160] + "…";
-                AgentEventPayload payload;
-                bool parsed;
-                string identity;
-                try
-                {
-                    parsed = AgentEventPayload.TryParse(item.Json, out payload);
-                    identity = AgentEventIdentity.Compute(item.Kind, "session_started", item.Json);
-                }
-                catch (InvalidOperationException ex) when (item.Root is "array" or "scalar")
-                {
-                    return PropertyResult.Known("CAND-01", input, tags, ex.Message);
-                }
+                var parsed = AgentEventPayload.TryParse(item.Json, out var payload);
+                var identity = AgentEventIdentity.Compute(item.Kind, "session_started", item.Json);
 
                 var expectedIdentity = item.ExpectedEventId is { } eventId
                     ? $"event:{item.Kind.ToString(CultureInfo.InvariantCulture)}:{eventId}"
@@ -79,11 +69,6 @@ public sealed class G17AgentEventProperties
                     && identity == expectedIdentity
                     && AgentEventIdentity.Compute((byte)(item.Kind + 1), "session_started", item.Json) != identity;
                 var note = $"parsed={parsed} payload={payload} expected={item.Expected}; identity {(identity == expectedIdentity ? "ok" : "differs")}";
-                if (item.Root is "array" or "scalar")
-                {
-                    return correct ? PropertyResult.Pass(input, tags, "CAND-01") : PropertyResult.Fail(input, tags, note);
-                }
-
                 return PropertyResult.Check(correct, input, tags, () => note);
             },
             iterations: 40_000,
@@ -92,8 +77,7 @@ public sealed class G17AgentEventProperties
                 .Dimension("event-id", "absent", "present")
                 .Infeasible("root", "array", "event-id", "present")
                 .Infeasible("root", "scalar", "event-id", "present")
-                .Infeasible("root", "invalid", "event-id", "present"),
-            knownDefects: ["CAND-01"]);
+                .Infeasible("root", "invalid", "event-id", "present"));
     }
 
     [Fact]

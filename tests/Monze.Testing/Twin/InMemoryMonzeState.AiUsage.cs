@@ -42,6 +42,21 @@ public sealed partial class InMemoryMonzeState
         }
     }
 
+    public Task RefundAiAsync(long clanId, long userId, int tokens, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            var key = (clanId, userId, CurrentDateLocked());
+            if (_aiUsage.TryGetValue(key, out var used))
+            {
+                _aiUsage[key] = Math.Max(0, used - Math.Max(1, tokens));
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
     // CURRENT_DATE is the date in the PostgreSQL session TimeZone, which
     // Monze never sets (server default applies). The twin takes that zone
     // from TimeProvider.LocalTimeZone (UTC for ManualTimeProvider).
