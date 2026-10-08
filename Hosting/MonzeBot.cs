@@ -65,6 +65,8 @@ public sealed partial class MonzeBot : BackgroundService
     private long _messageGapIngressDepth;
     private long _agentIngressDepth;
     private long _welcomeIngressDepth;
+    private long _agentPendingWriters;
+    private long _welcomePendingWriters;
     private long _outboxInFlight;
     private SqliteMessageStore? _messages;
 
@@ -138,6 +140,12 @@ public sealed partial class MonzeBot : BackgroundService
                 : 0,
             () => weakSelf.TryGetTarget(out var bot)
                 ? Volatile.Read(ref bot._outboxInFlight)
+                : 0,
+            () => weakSelf.TryGetTarget(out var bot)
+                ? Volatile.Read(ref bot._agentPendingWriters)
+                : 0,
+            () => weakSelf.TryGetTarget(out var bot)
+                ? Volatile.Read(ref bot._welcomePendingWriters)
                 : 0);
         var redisCache = _readModelCache as Monze.Infrastructure.Caching.MonzeReadModelCache;
         _logger.LogInformation(
@@ -321,7 +329,8 @@ public sealed partial class MonzeBot : BackgroundService
                 configuration.GetValue("Mezon:RateLimit:ConnectRequestsPerSecond", 2),
                 1,
                 100),
-            SocketHandlerTimeoutInMilliseconds = null
+            SocketHandlerTimeoutInMilliseconds = null,
+            DefaultRatelimitCallback = MonzeMetrics.RecordUpstreamRateLimit
         };
         customization?.Configure(options);
         return options;

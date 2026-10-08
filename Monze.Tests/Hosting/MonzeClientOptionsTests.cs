@@ -23,6 +23,9 @@ public sealed class MonzeClientOptionsTests
         Assert.Equal(500, options.MaxTransportRequestsPerMinute);
         Assert.Equal(2, options.MaxConnectRequestsPerSecond);
         Assert.Null(options.SocketHandlerTimeoutInMilliseconds);
+        Assert.Equal(
+            nameof(MonzeMetrics.RecordUpstreamRateLimit),
+            Assert.IsType<Func<IRateLimitInfo, Task>>(options.DefaultRatelimitCallback).Method.Name);
     }
 
     [Fact]

@@ -16,7 +16,7 @@ namespace Monze;
 public sealed partial class MonzeBot
 {
     private async Task HandleMeetingAsync(ICommandContext context)
-        => await ExecuteCommandOnceAsync(context, () => HandleMeetingCoreAsync(context));
+        => await ExecuteCommandOnceAsync(context, MonzeCommandNames.Meeting, () => HandleMeetingCoreAsync(context));
 
     private async Task HandleMeetingCoreAsync(
         ICommandContext context,
@@ -96,7 +96,7 @@ public sealed partial class MonzeBot
     }
 
     private async Task HandleSummaryAsync(ICommandContext context)
-        => await ExecuteCommandOnceAsync(context, () => HandleSummaryCoreAsync(context));
+        => await ExecuteCommandOnceAsync(context, MonzeCommandNames.Summary, () => HandleSummaryCoreAsync(context));
 
     private async Task HandleSummaryCoreAsync(
         ICommandContext context,

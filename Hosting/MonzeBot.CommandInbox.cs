@@ -10,6 +10,28 @@ public sealed partial class MonzeBot
 {
     private async Task ExecuteCommandOnceAsync(
         ICommandContext context,
+        string module,
+        Func<Task> handler)
+    {
+        var startedAt = _time.GetTimestamp();
+        var outcome = MonzeCommandMetricTags.Failed;
+        MonzeMetrics.CommandInflight.Add(1);
+        try
+        {
+            outcome = await ExecuteCommandOnceCoreAsync(context, handler);
+        }
+        finally
+        {
+            MonzeMetrics.CommandInflight.Add(-1);
+            MonzeMetrics.RecordCommand(
+                MonzeCommandMetricTags.Module(module),
+                outcome,
+                _time.GetElapsedTime(startedAt));
+        }
+    }
+
+    private async Task<string> ExecuteCommandOnceCoreAsync(
+        ICommandContext context,
         Func<Task> handler)
     {
         var clanId = context.Clan?.Id ?? 0;
@@ -18,7 +40,7 @@ public sealed partial class MonzeBot
         if (clanId <= 0 || channelId <= 0 || messageId <= 0)
         {
             await handler();
-            return;
+            return MonzeCommandMetricTags.Completed;
         }
 
         CommandInboxLease? lease;
@@ -32,7 +54,7 @@ public sealed partial class MonzeBot
         }
         catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
         {
-            return;
+            return MonzeCommandMetricTags.Cancelled;
         }
         catch (Exception ex)
         {
@@ -45,12 +67,12 @@ public sealed partial class MonzeBot
                 MonzeMessages.TitleMonze,
                 MonzeMessages.TemporaryFailure,
                 MonzeTone.Error));
-            return;
+            return MonzeCommandMetricTags.ClaimFailed;
         }
 
         if (lease is null)
         {
-            return;
+            return MonzeCommandMetricTags.Duplicate;
         }
 
         try
@@ -60,7 +82,7 @@ public sealed partial class MonzeBot
         catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
         {
             await MarkCommandUncertainAsync(lease.Value);
-            return;
+            return MonzeCommandMetricTags.Cancelled;
         }
         catch
         {
@@ -78,6 +100,7 @@ public sealed partial class MonzeBot
                     lease.Value.ChannelId,
                     lease.Value.MessageId);
                 await MarkCommandUncertainAsync(lease.Value);
+                return MonzeCommandMetricTags.Uncertain;
             }
         }
         catch (Exception ex)
@@ -89,7 +112,10 @@ public sealed partial class MonzeBot
                 lease.Value.ChannelId,
                 lease.Value.MessageId);
             await MarkCommandUncertainAsync(lease.Value);
+            return MonzeCommandMetricTags.Uncertain;
         }
+
+        return MonzeCommandMetricTags.Completed;
     }
 
     private async Task MarkCommandUncertainAsync(CommandInboxLease lease)

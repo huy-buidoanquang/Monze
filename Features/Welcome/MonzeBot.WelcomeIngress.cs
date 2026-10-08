@@ -39,6 +39,7 @@ public sealed partial class MonzeBot
     }
     private async Task WriteWelcomeAsync(WelcomeIngressItem item)
     {
+        Interlocked.Increment(ref _welcomePendingWriters);
         try
         {
             await _welcomeIngress.Writer.WriteAsync(item);
@@ -46,6 +47,10 @@ public sealed partial class MonzeBot
         }
         catch (ChannelClosedException)
         {
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _welcomePendingWriters);
         }
     }
     private async Task ConsumeWelcomeAsync(

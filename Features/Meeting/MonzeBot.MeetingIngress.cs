@@ -40,6 +40,7 @@ public sealed partial class MonzeBot
     }
     private async Task WriteMeetingAsync(MeetingIngressItem item)
     {
+        Interlocked.Increment(ref _agentPendingWriters);
         try
         {
             await _meetingIngress.Writer.WriteAsync(item);
@@ -47,6 +48,10 @@ public sealed partial class MonzeBot
         }
         catch (ChannelClosedException)
         {
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _agentPendingWriters);
         }
     }
     private async Task ConsumeAgentEventsAsync(

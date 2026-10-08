@@ -9,6 +9,8 @@
     <ProjectReference Include="..\Monze.Application\Monze.Application.csproj" />
     <ProjectReference Include="..\Monze.Domain\Monze.Domain.csproj" />
     <ProjectReference Include="..\Monze.Infrastructure\Monze.Infrastructure.csproj" />
+    <ProjectReference Include="..\Monze.csproj" />
     <PackageReference Include="BenchmarkDotNet" Version="0.15.2" />
   </ItemGroup>
+  <Import Project="..\tests\Build\Monze.NoAppSettings.targets" />
 </Project>

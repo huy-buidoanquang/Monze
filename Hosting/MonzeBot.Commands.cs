@@ -15,6 +15,7 @@ public sealed partial class MonzeBot
     private Task HandleMonzeAsync(ICommandContext context)
         => ExecuteCommandOnceAsync(
             context,
+            ResolveMonzeCommand(context),
             () => HandleMonzeCoreAsync(
                 context,
                 new CommandArguments(context.Args),
@@ -23,6 +24,7 @@ public sealed partial class MonzeBot
     private Task HandleDirectMonzeAsync(ICommandContext context, string module)
         => ExecuteCommandOnceAsync(
             context,
+            module,
             () => HandleMonzeCoreAsync(
                 context,
                 new CommandArguments(module, context.Args),
@@ -31,6 +33,7 @@ public sealed partial class MonzeBot
     private Task HandleDirectHelpAsync(ICommandContext context)
         => ExecuteCommandOnceAsync(
             context,
+            MonzeCommandNames.Help,
             () => HandleMonzeCoreAsync(
                 context,
                 new CommandArguments(MonzeCommandNames.Help, context.Args),
