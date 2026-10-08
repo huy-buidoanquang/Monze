@@ -1,9 +1,9 @@
 using Microsoft.Extensions.Logging;
 
-namespace Monze.Tests.E2E.Harness;
+namespace Monze.Simulator;
 
 /// <summary>One log line written by the Monze host under test.</summary>
-internal sealed record HostLogEntry(
+public sealed record HostLogEntry(
     DateTimeOffset At,
     LogLevel Level,
     string Category,

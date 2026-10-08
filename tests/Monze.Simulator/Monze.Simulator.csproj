@@ -9,5 +9,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\Monze.csproj" />
+    <ProjectReference Include="..\Monze.Testing\Monze.Testing.csproj" />
   </ItemGroup>
 </Project>

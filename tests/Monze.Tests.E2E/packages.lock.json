@@ -679,7 +679,8 @@
       "monze.simulator": {
         "type": "Project",
         "dependencies": {
-          "Monze": "[1.0.0, )"
+          "Monze": "[1.0.0, )",
+          "Monze.Testing": "[1.0.0, )"
         }
       },
       "monze.testing": {

@@ -1,18 +1,33 @@
 using System.Text;
 using Microsoft.Extensions.Logging;
 
-namespace Monze.Tests.E2E.Harness;
+namespace Monze.Simulator;
 
 /// <summary>
-/// Logger provider that keeps every log entry of the host under test in
-/// memory, so a test can wait for a lifecycle message and assert that the
-/// run logged no errors or exceptions.
+/// Logger provider that keeps every log entry of the Monze host under test
+/// in memory, so a test or a load run can wait for a lifecycle message and
+/// check that the run logged no errors or exceptions. Long load and soak runs
+/// keep only entries at or above <see cref="MinimumLevel"/> (waiters still see
+/// every entry) and at most <see cref="Capacity"/> of them, while
+/// <see cref="CountAtLeast"/> counts every entry written.
 /// </summary>
-internal sealed class HostLogSink : ILoggerProvider
+public sealed class HostLogSink : ILoggerProvider
 {
     private readonly object _gate = new();
-    private readonly List<HostLogEntry> _entries = [];
+    private readonly Queue<HostLogEntry> _entries = new();
+    private readonly long[] _counts = new long[(int)LogLevel.None + 1];
     private readonly List<(Func<HostLogEntry, bool> Predicate, TaskCompletionSource<HostLogEntry> Completion)> _waiters = [];
+
+    public HostLogSink(LogLevel minimumLevel = LogLevel.Trace, int capacity = int.MaxValue)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(capacity, 1);
+        MinimumLevel = minimumLevel;
+        Capacity = capacity;
+    }
+
+    public LogLevel MinimumLevel { get; }
+
+    public int Capacity { get; }
 
     public IReadOnlyList<HostLogEntry> Entries
     {
@@ -30,6 +45,21 @@ internal sealed class HostLogSink : ILoggerProvider
         => Entries.Where(static entry => entry.Level >= LogLevel.Error || entry.Exception is not null).ToList();
 
     public ILogger CreateLogger(string categoryName) => new SinkLogger(this, categoryName);
+
+    /// <summary>How many entries at or above <paramref name="level"/> were written, kept or not.</summary>
+    public long CountAtLeast(LogLevel level)
+    {
+        lock (_gate)
+        {
+            long total = 0;
+            for (var i = (int)level; i < (int)LogLevel.None; i++)
+            {
+                total += _counts[i];
+            }
+
+            return total;
+        }
+    }
 
     public async Task<HostLogEntry> WaitForAsync(Func<HostLogEntry, bool> predicate, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
@@ -86,7 +116,16 @@ internal sealed class HostLogSink : ILoggerProvider
         List<TaskCompletionSource<HostLogEntry>>? completed = null;
         lock (_gate)
         {
-            _entries.Add(entry);
+            _counts[(int)entry.Level]++;
+            if (entry.Level >= MinimumLevel)
+            {
+                _entries.Enqueue(entry);
+                if (_entries.Count > Capacity)
+                {
+                    _entries.Dequeue();
+                }
+            }
+
             foreach (var (predicate, completion) in _waiters)
             {
                 if (predicate(entry))

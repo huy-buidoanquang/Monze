@@ -33,6 +33,7 @@
     <InternalsVisibleTo Include="Monze.Tests.E2E" />
     <InternalsVisibleTo Include="Monze.Tests.Resilience" />
     <InternalsVisibleTo Include="Monze.Campaign" />
+    <InternalsVisibleTo Include="Monze.Simulator" />
   </ItemGroup>
   <ItemGroup>
     <None Update="appsettings.Development.local.json">
