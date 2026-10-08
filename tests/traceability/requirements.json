@@ -465,6 +465,30 @@
       "legacyTestIds": [],
       "covers": [],
       "tests": []
+    },
+    {
+      "id": "REQ-HARN-001",
+      "area": "harness",
+      "title": "Histogram log-linear không báo thấp và sai số ≤ 1/128; bộ thu metric gộp đúng counter, histogram, gauge theo tag",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-HARN-002",
+      "area": "harness",
+      "title": "TCP fault proxy (pass, latency, blackhole, refuse, reset) và điều khiển Docker chỉ chạm tài nguyên của campaign",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
+    },
+    {
+      "id": "REQ-HARN-003",
+      "area": "harness",
+      "title": "Invariant DB: dữ liệu nhất quán không có vi phạm, mỗi invariant phát hiện đúng vi phạm của nó",
+      "legacyTestIds": [],
+      "covers": [],
+      "tests": []
     }
   ]
 }

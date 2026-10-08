@@ -56,3 +56,19 @@ public sealed class RedisFactAttribute : FactAttribute
         }
     }
 }
+
+/// <summary>
+/// A fact that starts and stops its own campaign containers. It runs in a
+/// strict campaign (the orchestrator guarantees docker and the local images,
+/// and removes leftovers by label); a developer run reports it as skipped.
+/// </summary>
+public sealed class DockerFactAttribute : FactAttribute
+{
+    public DockerFactAttribute()
+    {
+        if (!CampaignEnvironment.Strict)
+        {
+            Skip = $"Runs only in a strict campaign ({CampaignEnvironment.StrictVariable}=1), which provides docker.";
+        }
+    }
+}
