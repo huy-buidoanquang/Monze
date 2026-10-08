@@ -7,4 +7,5 @@
   <Project Path="Monze.Benchmarks/Monze.Benchmarks.csproj" />
   <Project Path="tests/Monze.Testing/Monze.Testing.csproj" />
   <Project Path="tests/Monze.Tests.Integration/Monze.Tests.Integration.csproj" />
+  <Project Path="tests/Monze.TestReport/Monze.TestReport.csproj" />
 </Solution>
