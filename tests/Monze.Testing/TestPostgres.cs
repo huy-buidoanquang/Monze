@@ -20,7 +20,9 @@ public static class TestPostgres
     public const string ClusterNamePrefix = "monze-test-";
     public const string DatabaseNamePrefix = "monze_";
 
-    private static readonly ConcurrentDictionary<string, Lazy<string?>> VerifiedServers = new(StringComparer.Ordinal);
+    // Only verified servers are remembered: a failure (for example a container
+    // still starting) is checked again on the next use.
+    private static readonly ConcurrentDictionary<string, bool> VerifiedServers = new(StringComparer.Ordinal);
 
     public static bool IsConfigured
         => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(ConnectionVariable));
@@ -74,13 +76,17 @@ public static class TestPostgres
         }
 
         var serverKey = $"{builder.Host}:{builder.Port}";
-        var failure = VerifiedServers.GetOrAdd(
-            serverKey,
-            _ => new Lazy<string?>(() => VerifyCluster(builder))).Value;
-        if (failure is not null)
+        if (VerifiedServers.ContainsKey(serverKey))
+        {
+            return;
+        }
+
+        if (VerifyCluster(builder) is { } failure)
         {
             throw new InvalidOperationException(failure);
         }
+
+        VerifiedServers.TryAdd(serverKey, true);
     }
 
     private static string? VerifyCluster(NpgsqlConnectionStringBuilder builder)
@@ -97,7 +103,9 @@ public static class TestPostgres
         }
         catch (Exception ex) when (ex is NpgsqlException or InvalidOperationException or TimeoutException)
         {
-            return $"Test PostgreSQL is unreachable ({ex.GetType().Name}).";
+            return ex is PostgresException postgres
+                ? $"Test PostgreSQL is unreachable (PostgresException {postgres.SqlState})."
+                : $"Test PostgreSQL is unreachable ({ex.GetType().Name}).";
         }
     }
 

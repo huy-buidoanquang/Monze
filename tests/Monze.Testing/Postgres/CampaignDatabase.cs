@@ -18,6 +18,10 @@ public sealed class CampaignDatabase : IAsyncDisposable
         _server = server;
         Name = name;
         ConnectionString = new NpgsqlConnectionStringBuilder(server) { Database = name }.ConnectionString;
+
+        // Verify the server through its existing database first; the new
+        // database does not exist yet, so its own check only validates the name.
+        TestPostgres.AssertCampaignDatabase(server);
         TestPostgres.AssertCampaignDatabase(ConnectionString);
     }
 
