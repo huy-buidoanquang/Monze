@@ -12,8 +12,8 @@ namespace Monze.Tests.E2E.Workflows;
 /// <summary>
 /// Pre-registered scale defects, reproduced end to end:
 /// DEF-04 (one welcome worker for every clan: a slow welcome in clan A
-/// delays clan B) and DEF-06 (clan discovery reads one page of at most 100
-/// clans, so a bot in 150 clans never joins 50 of them).
+/// delays clan B) and DEF-06 (clan discovery gets at most 100 clans from
+/// the platform, so a bot in 150 clans never joins 50 of them).
 /// </summary>
 public sealed class ScaleDefectWorkflowTests(ITestOutputHelper output)
 {
@@ -54,22 +54,18 @@ public sealed class ScaleDefectWorkflowTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// DEF-06: RefreshClansAsync (Hosting/MonzeBot.Connection.cs) lists clans
-    /// once with the platform's page size and has no paging, and the clan
-    /// list is only read at start-up. The simulator caps ListClanDescs at
-    /// ClanDiscoveryLimit = 100 like the platform (docs/capacity-gate.md).
-    /// It is worse than "50 never joined": a list of 100 looks capped
-    /// (Monze.Domain/ClanDiscovery.cs ListLooksIncomplete, AssumedClanCap =
-    /// 100), and Merge files every clan the registry does not know yet as
-    /// IncompleteList (lines 31-35), which ApplyClanScanAsync skips. On a
-    /// fresh database no clan is registered at all, so even the owner of a
-    /// joined clan is refused every admin command. Correct behaviour
-    /// asserted: all 150 clans are registered and joined, and the owner of a
-    /// joined clan may switch its welcome on.
+    /// DEF-06: mezon-api answers ListClanDescs with at most 100 clans and
+    /// ignores limit and cursor (server/core_clan_desc.go: LIMIT 100 without
+    /// ORDER BY, cached per user), and the simulator caps it the same way
+    /// (ClanDiscoveryLimit = 100). Regression: Monze used to take a list of
+    /// 100 as untrustworthy and register none of it, so on a fresh database
+    /// the owner of a joined clan was refused every admin command; the 100
+    /// listed clans are now registered and their owners served. Still open
+    /// (platform): the other 50 are never discovered.
     /// </summary>
     [DbFact]
     [Req("REQ-CONN-001")]
-    public async Task A_bot_in_150_clans_never_joins_50_of_them_DEF_06()
+    public async Task A_bot_in_150_clans_registers_the_100_listed_and_never_sees_50_DEF_06()
     {
         const int clans = 150;
         const long firstClan = 1_840_000_000_100_000_000L;
@@ -91,16 +87,16 @@ public sealed class ScaleDefectWorkflowTests(ITestOutputHelper output)
         var on = await E2EActions.CommandAsync(host, firstChannel, OwnerId, "*welcome on", clanId: firstClan);
         var answer = E2EContent.Visible(E2EActions.NewMessageAfter(host, on, firstChannel));
 
+        Assert.Equal(100L, registered);
+        Assert.Equal(100, session.JoinedClans.Count);
+        Assert.Contains(MonzeMessages.WelcomeEnabled, answer);
+        Assert.Single(host.Logs.Entries, static entry => entry.Message.StartsWith("Mezon clan discovery returned the server's cap", StringComparison.Ordinal));
         KnownDefect.ExpectFailure("DEF-06", () =>
         {
             Assert.Equal(clans, registered);
             Assert.Equal(clans, session.JoinedClans.Count);
-            Assert.Contains(MonzeMessages.WelcomeEnabled, answer);
         });
-        Assert.Equal(0L, registered);
-        Assert.Equal(100, session.JoinedClans.Count);
-        Assert.Contains(MonzeMessages.WelcomeAdminOnly, answer);
-        await E2EOracles.AssertAsync(host, mark, ScenarioExpectation.Of((on, ResponseKind.Reply)));
+        await E2EOracles.AssertAsync(host, mark, ScenarioExpectation.Of((on, ResponseKind.Ephemeral)));
         await E2EOracles.AssertInvariantsAsync(host);
     }
 }

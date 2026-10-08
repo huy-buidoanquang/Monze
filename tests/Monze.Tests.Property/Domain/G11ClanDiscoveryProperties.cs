@@ -7,9 +7,10 @@ using Xunit;
 namespace Monze.Tests.Property.Domain;
 
 /// <summary>
-/// G11: ClanDiscovery around the assumed list cap of 100. A capped list never
-/// inserts an unknown clan or marks a known clan missing; every listed clan
-/// gets exactly one disposition; pending joins keep the input order.
+/// G11: ClanDiscovery around the assumed list cap of 100. Every listed clan
+/// gets exactly one disposition and an unknown one is inserted, capped list
+/// or not (DEF-06); a capped list never marks a known clan missing; pending
+/// joins keep the input order.
 /// </summary>
 public sealed class G11ClanDiscoveryProperties
 {
@@ -45,7 +46,7 @@ public sealed class G11ClanDiscoveryProperties
     [Fact]
     [Req("REQ-CONN-001")]
     [Covers("port:IClanRegistryRepository.ApplyClanScanAsync")]
-    public void Discovery_never_trusts_a_capped_list()
+    public void Discovery_never_infers_absence_from_a_capped_list()
     {
         PropertyRun.Run(
             "G11",
@@ -66,7 +67,7 @@ public sealed class G11ClanDiscoveryProperties
                 }
 
                 var known = item.Known.ToDictionary(static clan => clan.ClanId);
-                var merged = ClanDiscovery.Merge(item.Known, item.Listed, capped);
+                var merged = ClanDiscovery.Merge(item.Known, item.Listed);
                 if (merged.Count != item.Listed.Length)
                 {
                     return PropertyResult.Fail(input, tags, "merge must return one disposition per listed clan");
@@ -76,7 +77,7 @@ public sealed class G11ClanDiscoveryProperties
                 {
                     var (listed, disposition) = merged[i];
                     var expected = !known.TryGetValue(listed.ClanId, out var existing)
-                        ? capped ? ClanScanDisposition.IncompleteList : ClanScanDisposition.Inserted
+                        ? ClanScanDisposition.Inserted
                         : existing.OwnerId != listed.OwnerId ? ClanScanDisposition.OwnerReplaced : ClanScanDisposition.Unchanged;
                     if (!ReferenceEquals(listed, item.Listed[i]) || disposition != expected)
                     {

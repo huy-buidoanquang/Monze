@@ -236,6 +236,7 @@ public sealed partial class MonzeBot : BackgroundService
         var welcomeWorker = ConsumeWelcomeAsync(client, runtimeToken);
         var roleWorker = Task.CompletedTask;
         var outboxWorker = Task.CompletedTask;
+        AgentEventStream? agentEvents = null;
 
         try
         {
@@ -246,7 +247,15 @@ public sealed partial class MonzeBot : BackgroundService
                 runtimeToken);
             if (!string.IsNullOrWhiteSpace(options.AgentEventUrl))
             {
-                await client.ConnectAgentSseAsync(runtimeToken);
+                agentEvents = new AgentEventStream(
+                    options.AgentEventUrl,
+                    botId,
+                    token,
+                    TimeSpan.FromSeconds(Math.Clamp(_configuration.GetValue("Mezon:AgentSse:IdleTimeoutSeconds", 45), 1, 3600)),
+                    _time,
+                    _logger,
+                    RouteAgentEventAsync);
+                await agentEvents.ConnectAsync(runtimeToken);
             }
 
             outboxWorker = RunOutboxWorkerAsync(client, CreateOutboxPacer(_configuration, options, _time), runtimeToken);
@@ -282,6 +291,11 @@ public sealed partial class MonzeBot : BackgroundService
         {
             client.ChannelMessageReceived -= EnqueueMessageAsync;
             runtimeCts.Cancel();
+            if (agentEvents is not null)
+            {
+                await agentEvents.DisposeAsync();
+            }
+
             _messageIngress.Complete();
             _meetingIngress.Writer.TryComplete();
             _welcomeIngress.Writer.TryComplete();

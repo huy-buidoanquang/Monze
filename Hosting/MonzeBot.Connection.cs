@@ -90,6 +90,15 @@ public sealed partial class MonzeBot
 
         var list = await client.ListClanDescsAsync(new ListClanDescParams());
         _logger.LogInformation("Mezon clan discovery response received. ListedClans={ListedClans}.", list.Clandesc.Count);
+        if (ClanDiscovery.ListLooksCapped(list.Clandesc.Count))
+        {
+            // mezon-api answers ListClanDescs with at most 100 clans, ignoring limit and
+            // cursor (DEF-06); clans beyond it are joined only once they are registered.
+            _logger.LogWarning(
+                "Mezon clan discovery returned the server's cap of {Cap} clans; clans beyond it are not discovered.",
+                ClanDiscovery.AssumedClanCap);
+        }
+
         var listed = new List<ClanScanItem>(list.Clandesc.Count);
         var listedIds = new HashSet<long>();
         for (var i = 0; i < list.Clandesc.Count; i++)
@@ -109,7 +118,7 @@ public sealed partial class MonzeBot
 
         var incomplete = ClanDiscovery.ListLooksIncomplete(listed.Count, known.Count);
         await _clans.MarkDiscoveryIncompleteAsync(incomplete, cancellationToken);
-        foreach (var (item, disposition) in ClanDiscovery.Merge(known, listed, incomplete))
+        foreach (var (item, disposition) in ClanDiscovery.Merge(known, listed))
         {
             await _clans.ApplyClanScanAsync(item, disposition, cancellationToken);
         }

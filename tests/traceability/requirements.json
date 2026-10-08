@@ -103,7 +103,7 @@
       "area": "meeting",
       "title": "Sự kiện Agent: lọc scope, khử trùng, gắn đúng phiên meeting",
       "legacyTestIds": ["EVT-AGENT", "WRK-MEETING"],
-      "covers": ["sdk:client.AgentSession*", "sdk:client.ConnectAgentSseAsync", "table:agent_event", "table:inbox_event", "log@Features/Meeting/MonzeBot.Agent.cs", "log@Features/Meeting/MonzeBot.MeetingIngress.cs", "metric:monze.ingress.agent.*", "metric:monze.agent.*", "cfg:Mezon:AgentBaseUrl"],
+      "covers": ["cfg:Mezon:AgentSse:*", "log@Infrastructure/Agent/AgentSseIdleStream.cs", "table:agent_event", "table:inbox_event", "log@Features/Meeting/MonzeBot.Agent.cs", "log@Features/Meeting/MonzeBot.MeetingIngress.cs", "metric:monze.ingress.agent.*", "metric:monze.agent.*", "cfg:Mezon:AgentBaseUrl"],
       "tests": ["AgentEventIdentityTests.*", "AgentEventPayloadTests.*", "AgentEventScopePolicyTests.*", "MeetingIngressItemTests.*", "PostgresMeetingCycleTests.*"]
     },
     {

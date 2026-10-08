@@ -33,12 +33,6 @@ public sealed class PostgresClanRegistryRepositoryTests
             Assert.Equal(newOwnerId, state.OwnerId);
             Assert.Equal(0L, state.AdminCount);
             Assert.Equal(6L, state.SettingsVersion);
-
-            await repository.ApplyClanScanAsync(
-                new ClanScanItem(clanId, oldOwnerId),
-                ClanScanDisposition.IncompleteList,
-                CancellationToken.None);
-            Assert.Equal(newOwnerId, (await ReadStateAsync(dataSource, clanId)).OwnerId);
         }
         finally
         {

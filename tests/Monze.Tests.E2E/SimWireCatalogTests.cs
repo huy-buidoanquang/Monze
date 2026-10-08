@@ -45,7 +45,8 @@ public sealed partial class SimWireCatalogTests
         typeof(ICommandContext),
         typeof(IInteractionContext),
         typeof(InteractionRouter),
-        typeof(CommandService)
+        typeof(CommandService),
+        typeof(Mezon.Net.Sdk.Agent.AgentSseManager)
     ];
 
     // SDK method -> wire operations it causes at v1.6.2 (MezonClient.cs,
@@ -56,7 +57,8 @@ public sealed partial class SimWireCatalogTests
         // ListClanDescs + ClanJoin per clan; the heartbeat loop pings.
         ["LoginAsync"] = [SimOperations.Authenticate, SimOperations.SocketConnect, SimOperations.Heartbeat, SimOperations.ListChannelDescs, SimOperations.ListClanDescs, SimOperations.ClanJoin],
         ["DisposeAsync"] = [SimOperations.SocketDisconnect],
-        ["ConnectAgentSseAsync"] = [SimOperations.AgentSse],
+        // Monze's own AgentSseManager (Infrastructure/Agent/AgentEventStream.cs).
+        ["ConnectAsync"] = [SimOperations.AgentSse],
         ["ListClanDescsAsync"] = [SimOperations.ListClanDescs],
         ["JoinClanAsync"] = [SimOperations.ClanJoin],
         ["GetClanAsync"] = [SimOperations.ListClanDescs],
@@ -94,10 +96,7 @@ public sealed partial class SimWireCatalogTests
         ["ChannelDeleted"] = nameof(SimPushKind.ChannelDeletedEvent),
         ["Connected"] = Socket,
         ["Disconnected"] = Socket,
-        ["Reconnecting"] = Socket,
-        ["AgentSessionStarted"] = SimOperations.AgentSse,
-        ["AgentSessionEnded"] = SimOperations.AgentSse,
-        ["AgentSessionSummaryDone"] = SimOperations.AgentSse
+        ["Reconnecting"] = Socket
     };
 
     [Fact]

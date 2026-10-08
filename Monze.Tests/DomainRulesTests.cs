@@ -8,14 +8,15 @@ namespace Monze.Tests;
 
 public class DomainRulesTests
 {
+    /// <summary>Regression for DEF-06: a capped list still registers the clans it lists, and retires none.</summary>
     [Fact]
-    public void Capped_clan_list_does_not_insert_or_drop()
+    public void Capped_clan_list_inserts_what_it_lists_and_drops_nothing()
     {
         var known = new[] { new KnownClan(1, 10) };
         var listed = new[] { new ClanScanItem(2, 20) };
-        var merged = ClanDiscovery.Merge(known, listed, listLooksCapped: true);
-        Assert.Equal(ClanScanDisposition.IncompleteList, merged[0].Disposition);
-        Assert.DoesNotContain(merged, item => item.Disposition == ClanScanDisposition.Inserted);
+        var merged = ClanDiscovery.Merge(known, listed);
+        Assert.Equal(ClanScanDisposition.Inserted, Assert.Single(merged).Disposition);
+        Assert.False(ClanDiscovery.IsKnownMissing(known[0], new HashSet<long> { 2 }, listLooksCapped: true));
     }
 
     [Fact]

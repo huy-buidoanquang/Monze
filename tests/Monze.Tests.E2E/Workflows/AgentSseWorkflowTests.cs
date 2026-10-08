@@ -11,8 +11,9 @@ namespace Monze.Tests.E2E.Workflows;
 /// Monze's Agent ingress): a refused first connect and a dropped stream are
 /// followed by reconnects and later events are processed; duplicate,
 /// reordered, malformed, empty, oversized and out-of-scope events change the
-/// meeting state once and only where they belong. DEF-08 (no idle detection,
-/// no Last-Event-ID) is checked as a known defect on a half-open stream.
+/// meeting state once and only where they belong. Monze reads the stream
+/// through its own HTTP pipeline (AgentEventStream), which resumes with
+/// Last-Event-ID and replaces a half-open stream (regression for DEF-08).
 /// </summary>
 public sealed class AgentSseWorkflowTests
 {
@@ -36,28 +37,34 @@ public sealed class AgentSseWorkflowTests
         Assert.Equal(1, await http.PublishAgentEventAsync("room_ended", room, VoiceId, ClanId));
         await MeetingAgentWorkflowTests.WaitForStatusAsync(host, room, "summary_pending");
 
-        // The SDK reconnects without Last-Event-ID (observed fact, see DEF-08).
-        Assert.All(http.Requests.Where(static request => request.Route == SimHttpRoute.AgentSse), static request => Assert.False(request.HadLastEventId));
+        // Nothing was seen before the first open; the reconnect resumes after room_started.
+        Assert.Equal(new[] { false, false, true }, http.Requests.Where(static request => request.Route == SimHttpRoute.AgentSse).Select(static request => request.HadLastEventId));
         await E2EOracles.AssertAsync(host, phase, new ScenarioExpectation { OtherOutputs = 2 });
         await E2EOracles.AssertInvariantsAsync(host);
     }
 
     /// <summary>
-    /// DEF-08 (pre-registered): AgentSseManager reads with an infinite
-    /// HttpClient timeout and no idle detection (Mezon.Net.Sdk 1.6.2
-    /// src/Mezon.Net.Sdk/Agent/AgentSseManager.cs ReadOnceAsync), and never
-    /// sends Last-Event-ID. A half-open stream (the server keeps sending
-    /// keepalives every second, none arrive) is never replaced, so every
-    /// Agent event after it is lost. The correct behaviour asserted: within
-    /// 10 s (ten missed keepalives) a new stream is opened with Last-Event-ID
-    /// and the missed room_ended is processed.
+    /// Regression for DEF-08: the SDK's AgentSseManager reads with an
+    /// infinite HttpClient timeout and no idle detection (Mezon.Net.Sdk 1.6.2
+    /// src/Mezon.Net.Sdk/Agent/AgentSseManager.cs ReadOnceAsync) and never
+    /// sends Last-Event-ID, so a half-open stream (the server keeps sending
+    /// keepalives every second, none arrive) used to lose every Agent event
+    /// until a restart. Monze's pipeline ends a stream that has sent
+    /// keepalives and then stays silent for three keepalive gaps (at least
+    /// Mezon:AgentSse:IdleTimeoutSeconds, 2 here): within 10 s a new stream
+    /// is opened with Last-Event-ID and the missed room_ended is replayed and
+    /// processed. A stream that goes silent before its second keepalive is
+    /// not timed out (the live server's keepalive interval is unknown).
     /// </summary>
     [DbFact]
     [Req("REQ-MTG-003", "REQ-CONN-001")]
-    public async Task A_half_open_stream_is_never_detected_DEF_08()
+    public async Task A_half_open_stream_is_replaced_and_resumed_after_the_last_event()
     {
         await using var http = await E2EActions.HttpAsync();
-        await using var host = await E2EActions.StartAsync("wf_sse_halfopen", http: http);
+        await using var host = await E2EActions.StartAsync("wf_sse_halfopen", http: http, configuration: new Dictionary<string, string?>
+        {
+            ["Mezon:AgentSse:IdleTimeoutSeconds"] = "2"
+        });
         await http.WaitForSseAsync(1, E2EOracles.Timeout);
         await MeetingAgentWorkflowTests.MeetingNowAsync(host);
 
@@ -65,19 +72,17 @@ public sealed class AgentSseWorkflowTests
         const string room = "sim-room-half-open";
         await http.PublishAgentEventAsync("room_started", room, VoiceId, ClanId);
         await MeetingAgentWorkflowTests.WaitForStatusAsync(host, room, "live");
+
+        // A healthy stream first: the fake sends a keepalive after each idle second.
+        await Task.Delay(TimeSpan.FromSeconds(2.5));
         Assert.Equal(1, http.HangSseStreams());
         Assert.Equal(0, await http.PublishAgentEventAsync("room_ended", room, VoiceId, ClanId));
 
-        await KnownDefect.ExpectFailureAsync("DEF-08", async () =>
-        {
-            await http.WaitForSseAsync(2, TimeSpan.FromSeconds(10));
-            Assert.True(http.Requests.Last(static request => request.Route == SimHttpRoute.AgentSse).HadLastEventId);
-            await MeetingAgentWorkflowTests.WaitForStatusAsync(host, room, "summary_pending");
-        });
+        await http.WaitForSseAsync(2, TimeSpan.FromSeconds(10));
+        Assert.True(http.Requests.Last(static request => request.Route == SimHttpRoute.AgentSse).HadLastEventId);
+        await MeetingAgentWorkflowTests.WaitForStatusAsync(host, room, "summary_pending");
 
-        Assert.Equal(1, http.SseConnections);
-        Assert.Equal("live", await host.ScalarAsync<string>("SELECT status FROM meeting_session WHERE room_id = @room;", ("room", room)));
-        await E2EOracles.AssertAsync(host, phase, new ScenarioExpectation { OtherOutputs = 1 });
+        await E2EOracles.AssertAsync(host, phase, new ScenarioExpectation { OtherOutputs = 2 });
         await E2EOracles.AssertInvariantsAsync(host);
     }
 
