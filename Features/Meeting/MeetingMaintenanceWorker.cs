@@ -11,11 +11,12 @@ public sealed class MeetingMaintenanceWorker(
     IInteractionInboxRepository interactionInbox,
     ITranscriptClient transcript,
     MeetingSummaryComposer summaryComposer,
+    StartupReadiness readiness,
     ILogger<MeetingMaintenanceWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await StartupSchemaValidator.Ready.WaitAsync(stoppingToken);
+        await readiness.Ready.WaitAsync(stoppingToken);
         var nextInboxPurge = DateTimeOffset.UtcNow;
         var nextCommandInboxPurge = nextInboxPurge;
         var nextInteractionInboxPurge = nextInboxPurge;

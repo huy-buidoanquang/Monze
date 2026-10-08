@@ -41,6 +41,7 @@ public sealed partial class MonzeBot : BackgroundService
     private readonly MonzeCommandOptions _commandOptions;
     private readonly MonzeConnectionRetryOptions _connectionRetryOptions;
     private readonly MonzeCommandRateLimiter _commandRateLimiter;
+    private readonly StartupReadiness _readiness;
     private readonly IEventIngressQueue<ChannelMessageEventData> _messageIngress;
     private readonly Channel<MessageGapIngressItem> _messageGapIngress;
     private readonly Channel<MeetingIngressItem> _meetingIngress;
@@ -86,6 +87,7 @@ public sealed partial class MonzeBot : BackgroundService
         MonzeCommandOptions commandOptions,
         MonzeConnectionRetryOptions connectionRetryOptions,
         MonzeCommandRateLimiter commandRateLimiter,
+        StartupReadiness readiness,
         ILogger<MonzeBot> logger)
     {
         _configuration = configuration;
@@ -109,6 +111,7 @@ public sealed partial class MonzeBot : BackgroundService
         _commandOptions = commandOptions;
         _connectionRetryOptions = connectionRetryOptions;
         _commandRateLimiter = commandRateLimiter;
+        _readiness = readiness;
         _logger = logger;
         var weakSelf = new WeakReference<MonzeBot>(this);
         MonzeMetrics.RegisterRuntimeState(
@@ -178,7 +181,7 @@ public sealed partial class MonzeBot : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await StartupSchemaValidator.Ready.WaitAsync(stoppingToken);
+        await _readiness.Ready.WaitAsync(stoppingToken);
         var botId = _configuration.GetValue<long>("Mezon:BotId");
         var token = _configuration["Mezon:Token"];
         if (botId == 0 || string.IsNullOrWhiteSpace(token))

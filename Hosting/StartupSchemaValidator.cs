@@ -6,15 +6,13 @@ namespace Monze.Hosting;
 
 internal sealed class StartupSchemaValidator : IHostedService
 {
-    public static Task Ready { get; private set; } = Task.CompletedTask;
-
     private readonly NpgsqlDataSource _dataSource;
-    private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly StartupReadiness _readiness;
 
-    public StartupSchemaValidator(NpgsqlDataSource dataSource)
+    public StartupSchemaValidator(NpgsqlDataSource dataSource, StartupReadiness readiness)
     {
         _dataSource = dataSource;
-        Ready = _ready.Task;
+        _readiness = readiness;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -22,11 +20,11 @@ internal sealed class StartupSchemaValidator : IHostedService
         try
         {
             await PostgresMigrator.ValidateAsync(_dataSource, cancellationToken);
-            _ready.TrySetResult();
+            _readiness.MarkReady();
         }
         catch (Exception ex)
         {
-            _ready.TrySetException(ex);
+            _readiness.MarkFailed(ex);
             throw;
         }
     }
