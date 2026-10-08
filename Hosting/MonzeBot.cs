@@ -42,6 +42,7 @@ public sealed partial class MonzeBot : BackgroundService
     private readonly MonzeConnectionRetryOptions _connectionRetryOptions;
     private readonly MonzeCommandRateLimiter _commandRateLimiter;
     private readonly StartupReadiness _readiness;
+    private readonly TimeProvider _time;
     private readonly IEventIngressQueue<ChannelMessageEventData> _messageIngress;
     private readonly Channel<MessageGapIngressItem> _messageGapIngress;
     private readonly Channel<MeetingIngressItem> _meetingIngress;
@@ -88,6 +89,7 @@ public sealed partial class MonzeBot : BackgroundService
         MonzeConnectionRetryOptions connectionRetryOptions,
         MonzeCommandRateLimiter commandRateLimiter,
         StartupReadiness readiness,
+        TimeProvider time,
         ILogger<MonzeBot> logger)
     {
         _configuration = configuration;
@@ -112,6 +114,7 @@ public sealed partial class MonzeBot : BackgroundService
         _connectionRetryOptions = connectionRetryOptions;
         _commandRateLimiter = commandRateLimiter;
         _readiness = readiness;
+        _time = time;
         _logger = logger;
         var weakSelf = new WeakReference<MonzeBot>(this);
         MonzeMetrics.RegisterRuntimeState(
@@ -270,7 +273,7 @@ public sealed partial class MonzeBot : BackgroundService
                     _logger.LogWarning(ex, "Monze worker iteration failed; retrying.");
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(1), runtimeToken);
+                await Task.Delay(TimeSpan.FromSeconds(1), _time, runtimeToken);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

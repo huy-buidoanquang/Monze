@@ -21,7 +21,8 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
     private readonly ISubscriber _subscriber;
     private readonly IConnectionMultiplexer _multiplexer;
     private readonly IDatabase _database;
-    private readonly MonzeL1Cache _l1 = new();
+    private readonly TimeProvider _time;
+    private readonly MonzeL1Cache _l1;
     private readonly ConcurrentDictionary<MonzeCacheKey, Lazy<Task<ReadModelCacheEntry?>>> _loads = new();
     private readonly ConcurrentDictionary<MonzeCacheKey, long> _generations = new();
     private readonly string _prefix;
@@ -37,8 +38,11 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
         IConnectionMultiplexer multiplexer,
         string environment,
         long botId,
-        ILogger<MonzeReadModelCache> logger)
+        ILogger<MonzeReadModelCache> logger,
+        TimeProvider? timeProvider = null)
     {
+        _time = timeProvider ?? TimeProvider.System;
+        _l1 = new MonzeL1Cache(_time);
         _multiplexer = multiplexer;
         _database = multiplexer.GetDatabase();
         _subscriber = multiplexer.GetSubscriber();
@@ -348,13 +352,16 @@ public sealed class MonzeReadModelCache : IReadModelCache, IDisposable
     private long Generation(MonzeCacheKey key)
         => _generations.TryGetValue(key, out var generation) ? generation : 0;
 
+    private long NowMilliseconds()
+        => (long)_time.GetElapsedTime(0).TotalMilliseconds;
+
     private bool RedisTemporarilyUnavailable()
-        => Environment.TickCount64 < Volatile.Read(ref _redisRetryAfterMilliseconds);
+        => NowMilliseconds() < Volatile.Read(ref _redisRetryAfterMilliseconds);
 
     private void MarkRedisFailure()
     {
         Volatile.Write(ref _redisHealthy, 0);
-        var now = Environment.TickCount64;
+        var now = NowMilliseconds();
         var retryAfter = now + RedisFailureCooldownMilliseconds;
         var previous = Volatile.Read(ref _redisRetryAfterMilliseconds);
         if (previous > now

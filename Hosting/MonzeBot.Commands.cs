@@ -79,7 +79,7 @@ public sealed partial class MonzeBot
                 clanId,
                 context.Author.Id,
                 commandKey,
-                DateTimeOffset.UtcNow,
+                _time.GetUtcNow(),
                 out var retryAfter))
         {
             var rateLimitResponse = MonzeMessageBuilder.Card(
@@ -137,7 +137,7 @@ public sealed partial class MonzeBot
                     _welcomeSetupDrafts.Set(
                         new WelcomeSetupDraftKey(clanId, context.Channel.Id, context.Author.Id),
                         settings,
-                        DateTimeOffset.UtcNow);
+                        _time.GetUtcNow());
                 }
                 await ReplyCommandAsync(context, MonzeMessageBuilder.Card(outcome, _commandOptions));
             }
@@ -215,7 +215,7 @@ public sealed partial class MonzeBot
             return null;
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _time.GetUtcNow();
         var cutoff = now.AddHours(-1);
         var history = new List<(long Id, long? CreatedAt, string Text)>(32);
         long? anchorCreatedAt = null;

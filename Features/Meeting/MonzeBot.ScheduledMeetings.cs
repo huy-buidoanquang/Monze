@@ -34,7 +34,7 @@ public sealed partial class MonzeBot
                     await _scheduling.CompleteMeetingScheduleAsync(
                         schedule.Id,
                         schedule.LeaseToken,
-                        DateTimeOffset.UtcNow.AddMinutes(5),
+                        _time.GetUtcNow().AddMinutes(5),
                         true,
                         cancellationToken);
                     continue;
@@ -47,7 +47,7 @@ public sealed partial class MonzeBot
                             schedule.Kind,
                             schedule.WhenText,
                             schedule.TimeZoneId,
-                            DateTimeOffset.UtcNow.AddSeconds(1),
+                            _time.GetUtcNow().AddSeconds(1),
                             out var nextRun,
                             out _))
                     {
@@ -70,7 +70,7 @@ public sealed partial class MonzeBot
                 var committed = await _scheduledMeeting.CommitScheduledMeetingAsync(
                     schedule,
                     voice.VoiceChannelId,
-                    DateTimeOffset.UtcNow.AddMinutes(20),
+                    _time.GetUtcNow().AddMinutes(20),
                     next,
                     MonzeMessages.MeetingAgentInstruction,
                     MonzeMessageBuilder.MeetingInvitation(
@@ -84,7 +84,7 @@ public sealed partial class MonzeBot
                     await _scheduling.CompleteMeetingScheduleAsync(
                         schedule.Id,
                         schedule.LeaseToken,
-                        DateTimeOffset.UtcNow.AddMinutes(1),
+                        _time.GetUtcNow().AddMinutes(1),
                         true,
                         cancellationToken);
                 }
@@ -102,7 +102,7 @@ public sealed partial class MonzeBot
                 await _scheduling.CompleteMeetingScheduleAsync(
                     schedule.Id,
                     schedule.LeaseToken,
-                    DateTimeOffset.UtcNow.AddMinutes(1),
+                    _time.GetUtcNow().AddMinutes(1),
                     true,
                     cancellationToken);
             }

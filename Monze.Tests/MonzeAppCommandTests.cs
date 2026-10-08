@@ -1,6 +1,7 @@
 using Monze.Application;
 using Monze.Application.Commands;
 using Monze.Domain;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
@@ -282,6 +283,28 @@ public sealed class MonzeAppCommandTests
         Assert.Contains(dependencies.RoleAssignments, item => item.UserId == 3 && item.RoleId == 70);
         Assert.Contains(dependencies.RecordedRoleGrants, item => item.UserId == 3 && item.RoleId == 80);
         Assert.DoesNotContain(dependencies.RoleAssignments, item => item.UserId == 4 && item.RoleId == 80);
+    }
+
+    [Fact]
+    [Req("REQ-TIME-001")]
+    public async Task Tenure_rule_uses_the_injected_clock()
+    {
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 1, 31, 12, 0, 0, TimeSpan.Zero));
+        var dependencies = new MonzeAppTestDependencies
+        {
+            RoleAutomationEnabled = true,
+            RoleRules = [new AutoRoleRule(ClanId, 80, RoleRuleKind.Tenure, "30", 1)],
+            Members = [new MemberRoleSnapshot(3, false, time.GetUtcNow().AddDays(-29), new HashSet<long>())]
+        };
+        var app = dependencies.CreateApp(withRoleGateway: true, timeProvider: time);
+
+        await app.ApplyAutomaticRoleRulesAsync(CancellationToken.None);
+        Assert.Empty(dependencies.RoleAssignments);
+
+        time.Advance(TimeSpan.FromDays(1));
+        await app.ApplyAutomaticRoleRulesAsync(CancellationToken.None);
+
+        Assert.Contains(dependencies.RoleAssignments, item => item.UserId == 3 && item.RoleId == 80);
     }
 
     [Fact]

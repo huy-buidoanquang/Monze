@@ -203,6 +203,7 @@ public sealed partial class MonzeBot
 
                 await Task.Delay(
                     TimeSpan.FromMilliseconds(250 * (attempt + 1)),
+                    _time,
                     cancellationToken);
             }
         }

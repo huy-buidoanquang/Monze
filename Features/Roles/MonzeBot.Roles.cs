@@ -27,7 +27,7 @@ public sealed partial class MonzeBot
                 _logger.LogWarning(ex, "Automatic role rule scan failed; retrying on the next interval.");
             }
 
-            await Task.Delay(interval, cancellationToken);
+            await Task.Delay(interval, _time, cancellationToken);
         }
     }
 }

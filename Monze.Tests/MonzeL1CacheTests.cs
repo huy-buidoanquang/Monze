@@ -1,5 +1,6 @@
 using Monze.Application;
 using Monze.Infrastructure.Caching;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
@@ -43,5 +44,34 @@ public sealed class MonzeL1CacheTests
         await Task.Delay(25);
 
         Assert.False(cache.TryGet(key, out _));
+    }
+
+    [Fact]
+    [Req("REQ-TIME-001")]
+    public void Expiry_follows_the_injected_clock()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+        using var cache = new MonzeL1Cache(time);
+        var key = new MonzeCacheKey(42, "settings", "current");
+        cache.Set(key, new ReadModelCacheEntry(1, "payload"), TimeSpan.FromSeconds(10), 7);
+
+        time.Advance(TimeSpan.FromSeconds(9));
+        Assert.True(cache.TryGet(key, out _));
+
+        time.Advance(TimeSpan.FromSeconds(1));
+        Assert.False(cache.TryGet(key, out _));
+    }
+
+    [Fact]
+    [Req("REQ-TIME-001")]
+    public void Maintenance_timer_runs_on_the_injected_clock()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+        var cache = new MonzeL1Cache(time);
+        Assert.Equal(1, time.ActiveTimerCount);
+
+        cache.Dispose();
+
+        Assert.Equal(0, time.ActiveTimerCount);
     }
 }

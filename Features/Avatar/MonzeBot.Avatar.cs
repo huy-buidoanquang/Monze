@@ -29,7 +29,7 @@ public sealed partial class MonzeBot
                 clanId,
                 context.Author.Id,
                 MonzeCommandNames.Avatar,
-                DateTimeOffset.UtcNow,
+                _time.GetUtcNow(),
                 out var retryAfter))
         {
             await ReplyCommandAsync(context, MonzeMessageBuilder.Card(

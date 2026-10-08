@@ -55,7 +55,7 @@ public sealed partial class MonzeApp
                     request.Kind,
                     request.WhenText!,
                     timeZoneId,
-                    DateTimeOffset.UtcNow,
+                    _time.GetUtcNow(),
                     out var next,
                     out var error))
             {
@@ -92,7 +92,7 @@ public sealed partial class MonzeApp
         if (!await _meeting.SuggestMeetingAsync(
                 sessionId,
                 voice.VoiceChannelId,
-                DateTimeOffset.UtcNow.AddMinutes(20),
+                _time.GetUtcNow().AddMinutes(20),
                 cancellationToken,
                 voice.Label))
         {

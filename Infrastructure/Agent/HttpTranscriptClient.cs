@@ -12,15 +12,17 @@ public sealed class HttpTranscriptClient : ITranscriptClient, IDisposable
     private readonly long _botId;
     private readonly string _botToken;
     private readonly SemaphoreSlim _tokenGate = new(1, 1);
+    private readonly TimeProvider _time;
     private string? _accessToken;
     private string? _refreshToken;
     private DateTimeOffset _accessTokenExpiresAt;
 
-    public HttpTranscriptClient(HttpClient http, long botId, string botToken)
+    public HttpTranscriptClient(HttpClient http, long botId, string botToken, TimeProvider? timeProvider = null)
     {
         _http = http ?? throw new ArgumentNullException(nameof(http));
         _botId = botId;
         _botToken = botToken ?? throw new ArgumentNullException(nameof(botToken));
+        _time = timeProvider ?? TimeProvider.System;
     }
 
     public async Task<AgentSummaryResult?> FetchSummaryAsync(string roomId, CancellationToken cancellationToken)
@@ -84,7 +86,7 @@ public sealed class HttpTranscriptClient : ITranscriptClient, IDisposable
                 {
                 }
 
-                await Task.Delay(TimeSpan.FromMilliseconds(250 * (attempt + 1)), operationToken);
+                await Task.Delay(TimeSpan.FromMilliseconds(250 * (attempt + 1)), _time, operationToken);
             }
         }
         catch (HttpRequestException)
@@ -177,7 +179,7 @@ public sealed class HttpTranscriptClient : ITranscriptClient, IDisposable
 
             _accessToken = accessToken;
             _refreshToken = refreshToken;
-            _accessTokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(expiresInSeconds);
+            _accessTokenExpiresAt = _time.GetUtcNow().AddSeconds(expiresInSeconds);
             return true;
         }
         catch (JsonException)
@@ -188,7 +190,7 @@ public sealed class HttpTranscriptClient : ITranscriptClient, IDisposable
 
     private bool IsAccessTokenValid()
         => !string.IsNullOrWhiteSpace(_accessToken)
-            && DateTimeOffset.UtcNow < _accessTokenExpiresAt - TimeSpan.FromSeconds(30);
+            && _time.GetUtcNow() < _accessTokenExpiresAt - TimeSpan.FromSeconds(30);
 
     private void InvalidateAccessToken(string token)
     {

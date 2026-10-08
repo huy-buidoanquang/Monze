@@ -76,6 +76,18 @@ public sealed class MonzeHostCompositionTests : IDisposable
     }
 
     [Fact]
+    [Req("REQ-HOST-010", "REQ-TIME-001")]
+    public void Production_clock_is_the_system_time_provider()
+    {
+        var builder = CreateBuilder([], ai: false);
+
+        var descriptor = Assert.Single(builder.Services, descriptor => descriptor.ServiceType == typeof(TimeProvider));
+
+        Assert.Same(TimeProvider.System, descriptor.ImplementationInstance);
+        DisposeInstances(builder.Services);
+    }
+
+    [Fact]
     [Req("REQ-HOST-003")]
     public void Migrate_composition_registers_no_hosted_services()
     {

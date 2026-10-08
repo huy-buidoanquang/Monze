@@ -136,7 +136,7 @@ public sealed partial class MonzeBot
                     attempt,
                     key.ClanId,
                     key.ChannelId);
-                await Task.Delay(TimeSpan.FromMilliseconds(100 * attempt), cancellationToken);
+                await Task.Delay(TimeSpan.FromMilliseconds(100 * attempt), _time, cancellationToken);
             }
             catch (Exception ex)
             {

@@ -17,6 +17,7 @@ public sealed partial class MonzeApp
     private readonly IWelcomeDraftStore _welcomeDrafts;
     private readonly AiExecutionOptions _aiOptions;
     private readonly SemaphoreSlim _aiConcurrency;
+    private readonly TimeProvider _time;
     private IMezonRoleGateway? _roleGateway;
 
     public MonzeApp(
@@ -31,7 +32,8 @@ public sealed partial class MonzeApp
         IAiProvider? ai = null,
         IReadModelCache? readModelCache = null,
         MonzeCommandOptions? commandOptions = null,
-        AiExecutionOptions? aiOptions = null)
+        AiExecutionOptions? aiOptions = null,
+        TimeProvider? timeProvider = null)
     {
         _authorization = authorization;
         _welcome = welcome;
@@ -46,6 +48,7 @@ public sealed partial class MonzeApp
         _welcomeDrafts = welcomeDrafts;
         _aiOptions = (aiOptions ?? AiExecutionOptions.Default).Normalize();
         _aiConcurrency = new SemaphoreSlim(_aiOptions.MaxConcurrentRequests, _aiOptions.MaxConcurrentRequests);
+        _time = timeProvider ?? TimeProvider.System;
     }
 
     public void AttachRoleGateway(IMezonRoleGateway roleGateway)

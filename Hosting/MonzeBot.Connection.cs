@@ -38,7 +38,7 @@ public sealed partial class MonzeBot
                 _logger.LogWarning(ex, "Mezon bot login failed; retrying in {RetryDelay}.", delay);
             }
 
-            await Task.Delay(delay, cancellationToken);
+            await Task.Delay(delay, _time, cancellationToken);
             delay = NextRetryDelay(delay);
         }
 
@@ -67,7 +67,7 @@ public sealed partial class MonzeBot
                     delay);
             }
 
-            await Task.Delay(delay, cancellationToken);
+            await Task.Delay(delay, _time, cancellationToken);
             delay = NextRetryDelay(delay);
         }
 

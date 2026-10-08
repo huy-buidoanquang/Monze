@@ -39,7 +39,7 @@ public sealed partial class MonzeBot
                 _logger.LogWarning(ex, "Outbox worker iteration failed; retrying.");
             }
 
-            await Task.Delay(pollMilliseconds, cancellationToken);
+            await Task.Delay(TimeSpan.FromMilliseconds(pollMilliseconds), _time, cancellationToken);
         }
     }
 
@@ -77,7 +77,7 @@ public sealed partial class MonzeBot
     {
         var startedAt = Stopwatch.GetTimestamp();
         Interlocked.Increment(ref _outboxInFlight);
-        var dueLag = DateTimeOffset.UtcNow - item.DueAt;
+        var dueLag = _time.GetUtcNow() - item.DueAt;
         if (dueLag >= TimeSpan.Zero)
         {
             MonzeMetrics.OutboxDueLagMilliseconds.Record(dueLag.TotalMilliseconds);

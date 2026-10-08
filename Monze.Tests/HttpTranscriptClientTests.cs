@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
@@ -171,6 +172,37 @@ public sealed class HttpTranscriptClientTests
         Assert.Equal(2, result.ActionItems.Count);
         Assert.Equal("toàn bộ nội dung", result.FullText);
         Assert.Equal("2026-10-01T10:00:00.0000000+00:00", result.CreatedAt?.ToString("O"));
+    }
+
+    [Fact]
+    [Req("REQ-TIME-001")]
+    public async Task FetchSummary_reuses_the_access_token_until_the_injected_clock_nears_expiry()
+    {
+        var handler = new HttpTranscriptRecordingHandler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v2/auth/mezon/bot/login" => Json(HttpStatusCode.OK, "{\"access_token\":\"access-1\",\"refresh_token\":\"refresh-1\",\"expires_in\":3600}"),
+            "/api/v2/auth/refresh" => Json(HttpStatusCode.OK, "{\"access_token\":\"access-2\",\"refresh_token\":\"refresh-2\",\"expires_in\":3600}"),
+            "/api/v2/summary/room/id/room-1" => request.Headers.Authorization?.Parameter == "access-2"
+                ? AuthorizedSummary(request, "access-2")
+                : AuthorizedSummary(request, "access-1"),
+            _ => Json(HttpStatusCode.NotFound, "{}")
+        });
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://agent.test/") };
+        using var client = new Monze.HttpTranscriptClient(http, 123, "bot-token", time);
+
+        await client.FetchSummaryAsync("room-1", CancellationToken.None);
+        time.Advance(TimeSpan.FromSeconds(3_569));
+        await client.FetchSummaryAsync("room-1", CancellationToken.None);
+        Assert.Equal(3, handler.Requests.Count);
+
+        time.Advance(TimeSpan.FromSeconds(1));
+        var result = await client.FetchSummaryAsync("room-1", CancellationToken.None);
+
+        Assert.Equal("đã xong", result?.Summary);
+        Assert.Equal(5, handler.Requests.Count);
+        Assert.Equal("/api/v2/auth/refresh", handler.Requests[3].RequestUri!.AbsolutePath);
+        Assert.Equal("access-2", handler.Requests[4].Headers.Authorization?.Parameter);
     }
 
     private static HttpResponseMessage AuthorizedSummary(HttpRequestMessage request, string expectedToken)

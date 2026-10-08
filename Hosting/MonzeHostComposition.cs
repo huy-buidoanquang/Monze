@@ -63,6 +63,7 @@ internal static class MonzeHostComposition
             : string.IsNullOrWhiteSpace(configuredRoot)
                 ? null
                 : configuredRoot.Trim();
+        builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton(new MonzeCommandOptions(commandPrefix, commandRoot));
         builder.Services.AddSingleton(MonzeConnectionRetryOptions.From(builder.Configuration));
         builder.Services.AddSingleton(new AiExecutionOptions(
@@ -141,7 +142,8 @@ internal static class MonzeHostComposition
             sp.GetService<IAiProvider>(),
             sp.GetRequiredService<IReadModelCache>(),
             sp.GetRequiredService<MonzeCommandOptions>(),
-            sp.GetRequiredService<AiExecutionOptions>()));
+            sp.GetRequiredService<AiExecutionOptions>(),
+            sp.GetRequiredService<TimeProvider>()));
         builder.Services.AddMemoryCache(cache => cache.SizeLimit = 64 * 1024 * 1024);
         var aiBase = builder.Configuration["Monze:Ai:BaseUrl"];
         var aiKey = builder.Configuration["Monze:Ai:ApiKey"];
@@ -186,7 +188,11 @@ internal static class MonzeHostComposition
                     Timeout = TimeSpan.FromSeconds(30)
                 };
                 http.DefaultRequestHeaders.UserAgent.ParseAdd("Monze/1.0");
-                return new HttpTranscriptClient(http, transcriptBotId, transcriptBotToken);
+                return new HttpTranscriptClient(
+                    http,
+                    transcriptBotId,
+                    transcriptBotToken,
+                    sp.GetRequiredService<TimeProvider>());
             });
 
             builder.Services.AddSingleton<StartupReadiness>();

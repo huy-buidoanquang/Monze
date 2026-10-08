@@ -242,13 +242,13 @@ public sealed partial class MonzeApp
         }
     }
 
-    private static bool MatchesAutomaticRule(AutoRoleRule rule, MemberRoleSnapshot member)
+    private bool MatchesAutomaticRule(AutoRoleRule rule, MemberRoleSnapshot member)
         => rule.Kind switch
         {
             RoleRuleKind.OnJoin => true,
             RoleRuleKind.Tenure => member.JoinedAt is { } joinedAt
                 && TryReadPositiveLong(rule.ConditionValue, out var days)
-                && RoleRules.MatchesTenure(joinedAt, DateTimeOffset.UtcNow, TimeSpan.FromDays(days)),
+                && RoleRules.MatchesTenure(joinedAt, _time.GetUtcNow(), TimeSpan.FromDays(days)),
             _ => false
         };
 

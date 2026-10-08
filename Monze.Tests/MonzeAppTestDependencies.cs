@@ -66,7 +66,8 @@ internal sealed class MonzeAppTestDependencies :
     public MonzeApp CreateApp(
         bool withAi = false,
         bool withRoleGateway = false,
-        AiExecutionOptions? aiOptions = null)
+        AiExecutionOptions? aiOptions = null,
+        TimeProvider? timeProvider = null)
     {
         var app = new MonzeApp(
             this,
@@ -78,7 +79,8 @@ internal sealed class MonzeAppTestDependencies :
             this,
             new MemoryWelcomeDraftStore(),
             withAi ? this : null,
-            aiOptions: aiOptions);
+            aiOptions: aiOptions,
+            timeProvider: timeProvider);
         if (withRoleGateway)
         {
             app.AttachRoleGateway(this);

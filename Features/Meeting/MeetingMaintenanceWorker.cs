@@ -12,19 +12,20 @@ public sealed class MeetingMaintenanceWorker(
     ITranscriptClient transcript,
     MeetingSummaryComposer summaryComposer,
     StartupReadiness readiness,
+    TimeProvider time,
     ILogger<MeetingMaintenanceWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await readiness.Ready.WaitAsync(stoppingToken);
-        var nextInboxPurge = DateTimeOffset.UtcNow;
+        var nextInboxPurge = time.GetUtcNow();
         var nextCommandInboxPurge = nextInboxPurge;
         var nextInteractionInboxPurge = nextInboxPurge;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                var now = DateTimeOffset.UtcNow;
+                var now = time.GetUtcNow();
                 await meeting.ExpireSuggestedAsync(now, stoppingToken);
                 await RetryPendingSummariesAsync(meeting, transcript, summaryComposer, logger, stoppingToken);
                 if (now >= nextInboxPurge)
@@ -54,7 +55,7 @@ public sealed class MeetingMaintenanceWorker(
                 logger.LogWarning(ex, "Meeting maintenance iteration failed; retrying.");
             }
 
-            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+            await Task.Delay(TimeSpan.FromMinutes(1), time, stoppingToken);
         }
     }
 

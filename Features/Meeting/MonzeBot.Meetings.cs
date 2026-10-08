@@ -37,7 +37,7 @@ public sealed partial class MonzeBot
                 clanId,
                 context.Author.Id,
                 MonzeCommandNames.Meeting,
-                DateTimeOffset.UtcNow,
+                _time.GetUtcNow(),
                 out var retryAfter))
         {
             await context.ReplyAsync(MonzeMessageBuilder.Card(
@@ -117,7 +117,7 @@ public sealed partial class MonzeBot
                 clanId,
                 context.Author.Id,
                 MonzeCommandNames.Summary,
-                DateTimeOffset.UtcNow,
+                _time.GetUtcNow(),
                 out var retryAfter))
         {
             await context.ReplyAsync(MonzeMessageBuilder.Card(
