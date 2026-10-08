@@ -86,9 +86,13 @@ public sealed class MeetingAreaTests
         Assert.Equal(new[] { "Once", "Daily", "Weekly" }, schedules.Select(static row => (string)row[2]!));
         var (full, fullCard) = await ListAsync(host, inputs);
         var cancelButtons = E2EContent.Buttons(full).Where(static id => id.StartsWith(MeetingButtonId.CancelPrefix, StringComparison.Ordinal)).ToList();
-        Assert.Equal(schedules.Select(static row => MeetingButtonId.CancelFor((long)row[0]!)), cancelButtons);
 
-        var cancelOnce = await E2EActions.ClickAsync(host, GeneralId, fullCard, OwnerId, cancelButtons[0]);
+        // The list is ordered by next run, which depends on the time of day
+        // (a daily 10:00 schedule runs today before tomorrow's 09:30 one-off).
+        var byNextRun = await host.RowsAsync("SELECT id FROM meeting_schedule WHERE clan_id = @clan ORDER BY next_run_at, id;", ("clan", ClanId));
+        Assert.Equal(byNextRun.Select(static row => MeetingButtonId.CancelFor((long)row[0]!)), cancelButtons);
+
+        var cancelOnce = await E2EActions.ClickAsync(host, GeneralId, fullCard, OwnerId, MeetingButtonId.CancelFor((long)schedules[0][0]!));
         inputs.Add(new(cancelOnce, ResponseKind.Update));
         Assert.Contains(MonzeMessages.MeetingScheduleCancelled, E2EContent.Visible(E2EActions.LastUpdateAfter(host, cancelOnce, fullCard)));
         var cancelDaily = await E2EActions.CommandAsync(host, GeneralId, OwnerId, $"*meeting cancel {schedules[1][0]}");
