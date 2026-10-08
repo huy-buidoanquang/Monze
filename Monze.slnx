@@ -5,4 +5,5 @@
   <Project Path="Monze.Infrastructure/Monze.Infrastructure.csproj" />
   <Project Path="Monze.Tests/Monze.Tests.csproj" />
   <Project Path="Monze.Benchmarks/Monze.Benchmarks.csproj" />
+  <Project Path="tests/Monze.Testing/Monze.Testing.csproj" />
 </Solution>

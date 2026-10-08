@@ -6,7 +6,7 @@
     <UseLocalMezonSdk>false</UseLocalMezonSdk>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <DefaultItemExcludes>$(DefaultItemExcludes);Monze.Domain/**;Monze.Application/**;Monze.Infrastructure/**;Monze.Tests/**;Monze.Benchmarks/**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Monze.Domain/**;Monze.Application/**;Monze.Infrastructure/**;Monze.Tests/**;Monze.Benchmarks/**;tests/**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
     <None Remove="appsettings.json" />
@@ -27,6 +27,12 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Monze.Tests" />
     <InternalsVisibleTo Include="Monze.Benchmarks" />
+    <InternalsVisibleTo Include="Monze.Testing" />
+    <InternalsVisibleTo Include="Monze.Tests.Property" />
+    <InternalsVisibleTo Include="Monze.Tests.Integration" />
+    <InternalsVisibleTo Include="Monze.Tests.E2E" />
+    <InternalsVisibleTo Include="Monze.Tests.Resilience" />
+    <InternalsVisibleTo Include="Monze.Campaign" />
   </ItemGroup>
   <ItemGroup>
     <None Update="appsettings.Development.local.json">

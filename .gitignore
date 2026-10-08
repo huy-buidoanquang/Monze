@@ -5,6 +5,9 @@ appsettings.*.local.json
 appsettings.secrets.json
 *.sqlite
 *.sqlite-*
+# Test campaign: only REPORT.md and campaign-summary.json are committed.
+docs/test-artifacts/*-campaign/raw/
+artifacts/campaign/
 
 
 ## Ignore Visual Studio temporary files, build results, and

@@ -679,6 +679,13 @@
           "SQLitePCLRaw.lib.e_sqlite3": "[3.53.3, )",
           "StackExchange.Redis": "[2.8.31, )"
         }
+      },
+      "monze.testing": {
+        "type": "Project",
+        "dependencies": {
+          "Npgsql": "[10.0.0, )",
+          "xunit.extensibility.core": "[2.9.3, )"
+        }
       }
     }
   }

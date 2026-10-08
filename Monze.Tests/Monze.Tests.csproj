@@ -18,5 +18,7 @@
     <ProjectReference Include="..\Monze.Application\Monze.Application.csproj" />
     <ProjectReference Include="..\Monze.Infrastructure\Monze.Infrastructure.csproj" />
     <ProjectReference Include="..\Monze.csproj" />
+    <ProjectReference Include="..\tests\Monze.Testing\Monze.Testing.csproj" />
   </ItemGroup>
+  <Import Project="..\tests\Build\Monze.NoAppSettings.targets" />
 </Project>
