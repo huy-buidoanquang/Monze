@@ -311,6 +311,33 @@ internal static partial class ArtifactReaders
         return results;
     }
 
+    /// <summary>The defect registry (tests/traceability/expected-gaps.json); empty without a repository root.</summary>
+    public static IReadOnlyList<ExpectedGap> ReadExpectedGaps(string? repositoryRoot)
+    {
+        var path = repositoryRoot is null ? null : Path.Combine(repositoryRoot, "tests", "traceability", "expected-gaps.json");
+        if (path is null || !File.Exists(path))
+        {
+            return [];
+        }
+
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        var gaps = new List<ExpectedGap>();
+        foreach (var defect in document.RootElement.GetProperty("defects").EnumerateArray())
+        {
+            gaps.Add(new ExpectedGap(
+                String(defect, "id") ?? "?",
+                String(defect, "severity") ?? "P3",
+                String(defect, "area") ?? string.Empty,
+                String(defect, "status") ?? string.Empty,
+                defect.TryGetProperty("block", out var block) && block.ValueKind == JsonValueKind.Number ? block.GetInt32() : 0,
+                String(defect, "title") ?? string.Empty,
+                String(defect, "location") ?? string.Empty,
+                String(defect, "suggestion") ?? string.Empty));
+        }
+
+        return gaps;
+    }
+
     public static IReadOnlyList<ArtifactDocument> ReadArtifacts(string rawDirectory, params string[] kinds)
     {
         var documents = new List<ArtifactDocument>();

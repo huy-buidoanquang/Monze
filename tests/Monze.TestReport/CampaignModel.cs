@@ -90,6 +90,9 @@ internal sealed record BrowserCase(string TestId, string Status, string? Priorit
 
 internal sealed record RedactionFinding(string File, int Line, string Rule);
 
+/// <summary>One entry of tests/traceability/expected-gaps.json.</summary>
+internal sealed record ExpectedGap(string Id, string Severity, string Area, string Status, int Block, string Title, string Location, string Suggestion);
+
 internal sealed record CampaignModel(
     CampaignManifest Manifest,
     IReadOnlyList<TestProjectSummary> TestProjects,
@@ -99,4 +102,5 @@ internal sealed record CampaignModel(
     IReadOnlyList<BenchmarkResult> Benchmarks,
     IReadOnlyList<ArtifactDocument> Artifacts,
     IReadOnlyList<BrowserCase> BrowserCases,
-    IReadOnlyList<RedactionFinding> RawRedactionFindings);
+    IReadOnlyList<RedactionFinding> RawRedactionFindings,
+    IReadOnlyList<ExpectedGap> ExpectedGaps);

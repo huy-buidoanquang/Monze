@@ -399,6 +399,9 @@ internal sealed class ReportRenderer
     {
         md.AppendLine("## 10. Defect");
         md.AppendLine();
+        RenderDefectRegistry(md);
+        md.AppendLine("### Bằng chứng của lần chạy");
+        md.AppendLine();
         var rows = new List<string>();
         foreach (var defect in _model.KnownDefects)
         {
@@ -438,6 +441,80 @@ internal sealed class ReportRenderer
             md.AppendLine("`xfail` = lỗi đã biết vẫn tái hiện (test giữ hành vi đúng làm kỳ vọng); `xpass` = lỗi không còn tái hiện, cần gỡ marker cùng bản sửa.");
         }
 
+        md.AppendLine();
+    }
+
+    /// <summary>
+    /// The registry (tests/traceability/expected-gaps.json) joined with what
+    /// this run observed: reproduced (xfail / KNOWN_GAP), no longer reproduced
+    /// (xpass / KNOWN_GAP_NOT_REPRODUCED) or not exercised. Defects the run
+    /// reported but the registry lacks are listed as unregistered.
+    /// </summary>
+    private void RenderDefectRegistry(StringBuilder md)
+    {
+        var observed = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        void Observe(string id, string outcome)
+        {
+            if (!observed.TryGetValue(id, out var list))
+            {
+                observed[id] = list = [];
+            }
+
+            list.Add(outcome);
+        }
+
+        foreach (var defect in _model.KnownDefects)
+        {
+            Observe(defect.DefectId, defect.Outcome);
+        }
+
+        foreach (var artifact in _model.Artifacts)
+        {
+            if (artifact.Root.TryGetProperty("defectIds", out var ids) && ids.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var id in ids.EnumerateArray())
+                {
+                    Observe(id.GetString() ?? string.Empty, Verdict(artifact.Root));
+                }
+            }
+        }
+
+        if (_model.ExpectedGaps.Count == 0)
+        {
+            md.AppendLine("Không có registry defect (tests/traceability/expected-gaps.json).");
+            md.AppendLine();
+            return;
+        }
+
+        md.AppendLine("| Defect | Mức | Khu vực | Lần chạy này | Mô tả | Vị trí | Đề xuất sửa | Khối sửa |");
+        md.AppendLine("|---|---|---|---|---|---|---|---|");
+        foreach (var gap in _model.ExpectedGaps.OrderBy(static gap => gap.Severity, StringComparer.Ordinal).ThenBy(static gap => gap.Block).ThenBy(static gap => gap.Id, StringComparer.Ordinal))
+        {
+            var run = observed.TryGetValue(gap.Id, out var outcomes)
+                ? outcomes.Any(static outcome => outcome is "xpass" or "KNOWN_GAP_NOT_REPRODUCED")
+                    ? "🔁 không còn tái hiện"
+                    : outcomes.Any(static outcome => outcome is "xfail" or "KNOWN_GAP")
+                        ? "⚠️ tái hiện"
+                        : string.Join(", ", outcomes.Distinct())
+                : gap.Status switch
+                {
+                    "fixed" => "✅ đã sửa",
+                    "not-reproduced" => "không tái hiện được",
+                    "observation" => "quan sát",
+                    _ => "không chạy trong lần này"
+                };
+            md.AppendLine($"| {Cell(gap.Id)} | {Cell(gap.Severity)} | {Cell(gap.Area)} | {run} | {Cell(gap.Title)} | {Cell(gap.Location)} | {Cell(gap.Suggestion)} | {(gap.Block > 0 ? gap.Block.ToString(Invariant) : "—")} |");
+        }
+
+        var unregistered = observed.Keys.Where(id => id.Length > 0 && _model.ExpectedGaps.All(gap => gap.Id != id)).Order(StringComparer.Ordinal).ToList();
+        if (unregistered.Count > 0)
+        {
+            md.AppendLine();
+            md.AppendLine($"Defect lần chạy báo nhưng chưa có trong registry: {string.Join(", ", unregistered.Select(Cell))}.");
+        }
+
+        md.AppendLine();
+        md.AppendLine($"{N(_model.ExpectedGaps.Count(static gap => gap.Severity == "P0"))} P0, {N(_model.ExpectedGaps.Count(static gap => gap.Severity == "P1"))} P1, {N(_model.ExpectedGaps.Count(static gap => gap.Severity == "P2"))} P2, {N(_model.ExpectedGaps.Count(static gap => gap.Severity == "P3"))} P3 trong registry. Khối sửa tăng dần theo mức ưu tiên.");
         md.AppendLine();
     }
 

@@ -35,7 +35,8 @@ internal static class ReportBuilder
             ArtifactReaders.ReadBenchmarks(Path.Combine(raw, "bdn")),
             ArtifactReaders.ReadArtifacts(raw, ArtifactKinds),
             ArtifactReaders.ReadBrowserLedger(browserLedger),
-            rawFindings);
+            rawFindings,
+            ArtifactReaders.ReadExpectedGaps(repositoryRoot));
 
         var gates = GateEvaluator.Evaluate(model, redactionViolated: false);
         var overall = GateEvaluator.Overall(gates, model);
