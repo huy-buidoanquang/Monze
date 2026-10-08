@@ -16,7 +16,8 @@ public sealed record MonzeWorkerTimings(
     TimeSpan InboxRetention,
     TimeSpan MessageGapRetryBase,
     TimeSpan AgentScopeRetryBase,
-    TimeSpan UncertainMarkTimeout)
+    TimeSpan UncertainMarkTimeout,
+    TimeSpan OutboxReconcileInterval)
 {
     public static MonzeWorkerTimings From(IConfiguration configuration)
         => new(
@@ -34,5 +35,6 @@ public sealed record MonzeWorkerTimings(
             InboxRetention: TimeSpan.FromDays(30),
             MessageGapRetryBase: TimeSpan.FromMilliseconds(100),
             AgentScopeRetryBase: TimeSpan.FromMilliseconds(250),
-            UncertainMarkTimeout: TimeSpan.FromSeconds(5));
+            UncertainMarkTimeout: TimeSpan.FromSeconds(5),
+            OutboxReconcileInterval: TimeSpan.FromSeconds(15));
 }

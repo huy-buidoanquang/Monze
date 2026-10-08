@@ -22,7 +22,8 @@ public sealed class MonzeWorkerTimingsTests
                 InboxRetention: TimeSpan.FromDays(30),
                 MessageGapRetryBase: TimeSpan.FromMilliseconds(100),
                 AgentScopeRetryBase: TimeSpan.FromMilliseconds(250),
-                UncertainMarkTimeout: TimeSpan.FromSeconds(5)),
+                UncertainMarkTimeout: TimeSpan.FromSeconds(5),
+                OutboxReconcileInterval: TimeSpan.FromSeconds(15)),
             timings);
     }
 

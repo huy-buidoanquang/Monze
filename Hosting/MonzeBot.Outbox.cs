@@ -1,6 +1,3 @@
-using System.Net;
-using System.Net.Http;
-using System.Net.Sockets;
 using System.Diagnostics;
 using Mezon.Net.Sdk;
 using Microsoft.Extensions.Configuration;
@@ -17,12 +14,19 @@ public sealed partial class MonzeBot
         MezonClient client,
         CancellationToken cancellationToken)
     {
+        var nextReconcile = _time.GetTimestamp();
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
                 while (await FlushOutboxBatchAsync(client, cancellationToken))
                 {
+                }
+
+                if (_time.GetElapsedTime(nextReconcile) >= TimeSpan.Zero)
+                {
+                    nextReconcile = _time.GetTimestamp() + (long)(_timings.OutboxReconcileInterval.TotalSeconds * _time.TimestampFrequency);
+                    await ReconcileUncertainOutboxAsync(client, cancellationToken);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -132,15 +136,7 @@ public sealed partial class MonzeBot
         try
         {
             var channel = await client.GetChannelAsync(item.ChannelId, cancellationToken);
-            var content = string.IsNullOrWhiteSpace(item.ContentJson)
-                ? item.Kind.Equals("MeetingSummary", StringComparison.OrdinalIgnoreCase)
-                    ? MonzeMessageBuilder.MeetingSummary(item.Body, item.ReplyToMessageId)
-                    : MonzeMessageBuilder.Card(item.Kind, item.Body, MonzeTone.Info)
-                : Mezon.Net.Client.MessageContent.Parse(item.ContentJson);
-            if (item.ReplyToMessageId is long replyToMessageId)
-            {
-                content = MessageContentReply.Apply(content, replyToMessageId);
-            }
+            var content = BuildOutboxContent(item);
             var references = MeetingReplyReference.Create(
                 item,
                 client.BotId,
@@ -176,25 +172,46 @@ public sealed partial class MonzeBot
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning(ex, "Outbox {OutboxId} did not get an ack", item.Id);
-            var uncertain = IsUncertainDeliveryFailure(ex);
-            if (uncertain)
+            var failure = OutboxDeliveryFailure.Classify(ex);
+            if (failure == OutboxFailureKind.Uncertain)
             {
+                // The message may be on the channel: reconcile, never resend blindly.
                 MonzeMetrics.OutboxUncertain.Add(1);
+                await TryCompleteOutboxAsync(item.Id, item.LeaseToken, null, true, cancellationToken, "delivery-uncertain");
+                return;
             }
-            else
+
+            MonzeMetrics.OutboxFailed.Add(1);
+            if (failure == OutboxFailureKind.NotSent)
             {
-                MonzeMetrics.OutboxFailed.Add(1);
+                // Nothing left the process (the socket is closed): retry until it is back.
+                await TryCompleteOutboxAsync(item.Id, item.LeaseToken, null, false, cancellationToken, "delivery-not-sent", countsAsAttempt: false);
+                return;
             }
-            var hold = uncertain || OutboxPolicy.Decide(kind, false, item.Attempts)
-                == OutboxAction.HoldForAdmin;
+
+            var hold = failure == OutboxFailureKind.Rejected
+                || OutboxPolicy.Decide(kind, false, item.Attempts + 1) == OutboxAction.HoldForAdmin;
             await TryCompleteOutboxAsync(
                 item.Id,
                 item.LeaseToken,
                 null,
                 hold,
                 cancellationToken,
-                uncertain ? "delivery-uncertain" : "delivery-failed");
+                failure == OutboxFailureKind.Rejected ? "delivery-rejected" : hold ? "retry-limit" : "delivery-failed");
         }
+    }
+
+    /// <summary>The content an outbox row is sent with; reconciliation compares against the same rendering.</summary>
+    private static Mezon.Net.Client.MessageContent BuildOutboxContent(DueOutbox item)
+    {
+        var content = string.IsNullOrWhiteSpace(item.ContentJson)
+            ? item.Kind.Equals("MeetingSummary", StringComparison.OrdinalIgnoreCase)
+                ? MonzeMessageBuilder.MeetingSummary(item.Body, item.ReplyToMessageId)
+                : MonzeMessageBuilder.Card(item.Kind, item.Body, MonzeTone.Info)
+            : Mezon.Net.Client.MessageContent.Parse(item.ContentJson);
+        return item.ReplyToMessageId is long replyToMessageId
+            ? MessageContentReply.Apply(content, replyToMessageId)
+            : content;
     }
 
     private async Task TryCompleteOutboxAsync(
@@ -203,7 +220,8 @@ public sealed partial class MonzeBot
         long? externalMessageId,
         bool failed,
         CancellationToken cancellationToken,
-        string? errorCode)
+        string? errorCode,
+        bool countsAsAttempt = true)
     {
         try
         {
@@ -213,7 +231,8 @@ public sealed partial class MonzeBot
                 externalMessageId,
                 failed,
                 cancellationToken,
-                errorCode);
+                errorCode,
+                countsAsAttempt);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -224,13 +243,6 @@ public sealed partial class MonzeBot
             _logger.LogWarning(ex, "Outbox {OutboxId} completion failed; lease will be reclaimed.", id);
         }
     }
-
-    private static bool IsUncertainDeliveryFailure(Exception exception)
-        => exception is TimeoutException
-            or TaskCanceledException
-            or HttpRequestException
-            or IOException
-            or System.Net.Sockets.SocketException;
 
 }
 

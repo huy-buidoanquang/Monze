@@ -159,7 +159,7 @@
       "area": "outbox",
       "title": "Outbox: claim theo lease, gửi, uncertain không gửi lại mù, retry có giới hạn",
       "legacyTestIds": ["WRK-OUTBOX", "PORT-OUTBOX"],
-      "covers": ["port:IOutboxRepository.*", "table:outbox_delivery", "log@Hosting/MonzeBot.Outbox.cs", "metric:monze.outbox.*", "cfg:Monze:Outbox:*"],
+      "covers": ["port:IOutboxRepository.*", "table:outbox_delivery", "log@Hosting/MonzeBot.Outbox.cs", "log@Hosting/MonzeBot.OutboxReconciliation.cs", "sdk:client.ListChannelMessagesAsync", "metric:monze.outbox.*", "cfg:Monze:Outbox:*"],
       "tests": ["PostgresOutboxRepositoryTests.*", "PostgresOutboxInvitationBindingTests.*", "MessageContentReplyTests.*"]
     },
     {

@@ -68,7 +68,10 @@ public class DomainRulesTests
     }
 
     [Theory]
-    [InlineData(OutboxKind.Announcement, false, 1, OutboxAction.HoldForAdmin)]
+    [InlineData(OutboxKind.Announcement, false, 0, OutboxAction.Send)]
+    [InlineData(OutboxKind.Announcement, false, 1, OutboxAction.Send)]
+    [InlineData(OutboxKind.Announcement, false, OutboxPolicy.MaxAttempts - 1, OutboxAction.Send)]
+    [InlineData(OutboxKind.Announcement, false, OutboxPolicy.MaxAttempts, OutboxAction.HoldForAdmin)]
     [InlineData(OutboxKind.MeetingSummary, true, 0, OutboxAction.AlreadyDelivered)]
     public void Outbox_policy(OutboxKind kind, bool hasId, int attempts, OutboxAction expected)
         => Assert.Equal(expected, OutboxPolicy.Decide(kind, hasId, attempts));

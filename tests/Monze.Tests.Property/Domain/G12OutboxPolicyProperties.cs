@@ -8,21 +8,22 @@ namespace Monze.Tests.Property.Domain;
 
 /// <summary>
 /// G12: OutboxPolicy. A row with an external message id is never sent again;
-/// only a row that has never failed is sent automatically; anything else is
-/// held for an admin. Together with the SQL lease (claim pending or expired
-/// sending rows, attempts + 1 on completion) this means automatic delivery is
-/// attempted once. OutboxAction.RetryOnce is never returned.
+/// a row is sent automatically while it has failed fewer than
+/// OutboxPolicy.MaxAttempts times and held for an admin after that. Only
+/// failures that prove the message never reached the channel count as
+/// attempts; uncertain deliveries are reconciled against the channel before
+/// any resend. OutboxAction.RetryOnce is never returned.
 /// </summary>
 public sealed class G12OutboxPolicyProperties
 {
     private static readonly Gen<int> Attempts = Gen.OneOf(
-        Gen.OneOfConst(int.MinValue, -1, 0, 1, 2, 5, int.MaxValue),
+        Gen.OneOfConst(int.MinValue, -1, 0, 1, OutboxPolicy.MaxAttempts - 1, OutboxPolicy.MaxAttempts, OutboxPolicy.MaxAttempts + 1, int.MaxValue),
         Gen.Int[0, 1_000]);
 
     [Fact]
     [Req("REQ-OUT-001")]
     [Covers("port:IOutboxRepository.CompleteOutboxAsync")]
-    public void Delivery_is_attempted_automatically_at_most_once()
+    public void Delivery_is_retried_until_the_attempt_limit()
     {
         PropertyRun.Run(
             "G12",
@@ -32,13 +33,13 @@ public sealed class G12OutboxPolicyProperties
                 var (kind, delivered, attempts) = value;
                 var expected = delivered
                     ? OutboxAction.AlreadyDelivered
-                    : attempts == 0 ? OutboxAction.Send : OutboxAction.HoldForAdmin;
+                    : attempts < OutboxPolicy.MaxAttempts ? OutboxAction.Send : OutboxAction.HoldForAdmin;
                 var actual = OutboxPolicy.Decide(kind, delivered, attempts);
                 var tags = new Dictionary<string, string>
                 {
                     ["kind"] = kind.ToString(),
                     ["delivered"] = delivered ? "yes" : "no",
-                    ["attempts"] = attempts switch { 0 => "zero", < 0 => "negative", _ => "positive" }
+                    ["attempts"] = attempts switch { 0 => "zero", < 0 => "negative", < OutboxPolicy.MaxAttempts => "below-limit", _ => "at-limit" }
                 };
                 return PropertyResult.Check(
                     actual == expected && actual != OutboxAction.RetryOnce,
@@ -50,6 +51,6 @@ public sealed class G12OutboxPolicyProperties
             declare: static ledger => ledger
                 .Dimension("kind", Enum.GetNames<OutboxKind>())
                 .Dimension("delivered", "yes", "no")
-                .Dimension("attempts", "zero", "negative", "positive"));
+                .Dimension("attempts", "zero", "negative", "below-limit", "at-limit"));
     }
 }

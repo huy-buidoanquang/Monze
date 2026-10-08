@@ -15,7 +15,7 @@ public sealed partial class PostgresOutboxRepository : IOutboxRepository
         var sql = clanId is null ? """
             WITH due AS (
               SELECT id, meeting_session_id FROM outbox_delivery
-              WHERE (status = 'pending' OR (status = 'sending' AND locked_until < now()))
+              WHERE status = 'pending'
                 AND due_at <= now()
                 AND (kind <> 'MeetingSummary' OR meeting_session_id IS NULL OR EXISTS (
                     SELECT 1 FROM meeting_session session
@@ -49,7 +49,7 @@ public sealed partial class PostgresOutboxRepository : IOutboxRepository
             WITH due AS (
               SELECT id, meeting_session_id FROM outbox_delivery
               WHERE clan_id = @clan
-                AND (status = 'pending' OR (status = 'sending' AND locked_until < now()))
+                AND status = 'pending'
                 AND due_at <= now()
                 AND (kind <> 'MeetingSummary' OR meeting_session_id IS NULL OR EXISTS (
                     SELECT 1 FROM meeting_session session
@@ -115,14 +115,15 @@ public sealed partial class PostgresOutboxRepository : IOutboxRepository
         long? externalMessageId,
         bool failed,
         CancellationToken cancellationToken,
-        string? errorCode = null)
+        string? errorCode = null,
+        bool countsAsAttempt = true)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
             WITH completed AS (
             UPDATE outbox_delivery
             SET status = @status,
-                attempts = attempts + 1,
+                attempts = attempts + CASE WHEN @counts THEN 1 ELSE 0 END,
                 external_message_id = COALESCE(@external, external_message_id),
                 locked_until = NULL,
                 lease_token = NULL,
@@ -134,6 +135,9 @@ public sealed partial class PostgresOutboxRepository : IOutboxRepository
                 due_at = CASE
                     WHEN @status = 'pending'
                     THEN now() + (power(2::numeric, LEAST(attempts + 1, 6)) * interval '5 seconds')
+                    -- An uncertain delivery is reconciled against the channel no sooner than 30 s later.
+                    WHEN @status = 'uncertain'
+                    THEN now() + interval '30 seconds'
                     ELSE due_at
                 END
             WHERE id = @id AND lease_token = @lease
@@ -176,6 +180,7 @@ public sealed partial class PostgresOutboxRepository : IOutboxRepository
         });
         command.Parameters.AddWithValue("id", id);
         command.Parameters.AddWithValue("lease", leaseToken);
+        command.Parameters.AddWithValue("counts", countsAsAttempt);
         command.Parameters.Add(new NpgsqlParameter("error", NpgsqlDbType.Text)
         {
             Value = (object?)errorCode ?? DBNull.Value

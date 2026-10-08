@@ -127,7 +127,8 @@ public sealed class SimulatedMonzeHost : IAsyncDisposable
                 RoleScanInterval = TimeSpan.FromSeconds(1),
                 MessageGapRetryBase = TimeSpan.FromMilliseconds(20),
                 AgentScopeRetryBase = TimeSpan.FromMilliseconds(20),
-                UncertainMarkTimeout = TimeSpan.FromSeconds(2)
+                UncertainMarkTimeout = TimeSpan.FromSeconds(2),
+                OutboxReconcileInterval = TimeSpan.FromSeconds(1)
             };
             if (options.Timings is { } adjust)
             {
