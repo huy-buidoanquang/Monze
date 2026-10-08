@@ -115,7 +115,16 @@ public sealed partial class SimTransporter
             var list = new ChannelDescList();
             if (request.ClanId == 0)
             {
-                // Direct-message channels are not modelled: the platform has none.
+                // Clan 0 lists the bot's direct-message channels (DmChannelManager
+                // asks for channel type Dm); group channels are not modelled.
+                if (request.ChannelType is 0 or (int)ChannelType.Dm)
+                {
+                    foreach (var direct in World.DirectChannels)
+                    {
+                        list.Channeldesc.Add(DirectDescription(direct));
+                    }
+                }
+
                 return ApiOutcome.Ok(draft, list);
             }
 
@@ -150,6 +159,11 @@ public sealed partial class SimTransporter
             }
 
             var withClan = draft with { ClanId = channel.ClanId };
+            if (World.DirectPeer(channel.Id) is not null)
+            {
+                return ApiOutcome.Ok(withClan, DirectDescription(channel));
+            }
+
             return World.IsMember(channel.ClanId, BotId)
                 ? ApiOutcome.Ok(withClan, _simulator.ToDescription(channel))
                 : ApiOutcome.Fail(withClan, MezonStatusCode.PermissionDenied);
@@ -415,6 +429,20 @@ public sealed partial class SimTransporter
         return new ApiCall(draft, () => _simulator.RefreshSession(request.Token) is { } session
             ? ApiOutcome.Ok(draft, session)
             : ApiOutcome.Fail(draft, MezonStatusCode.Unauthenticated));
+    }
+
+    /// <summary>A direct-message channel lists its peer in user_ids, as DmChannelManager expects.</summary>
+    private Mezon.Net.Internal.Api.ChannelDescription DirectDescription(SimChannel channel)
+    {
+        var description = _simulator.ToDescription(channel);
+        if (World.DirectPeer(channel.Id) is long peer && World.FindUser(peer) is { } user)
+        {
+            description.UserIds.Add(peer);
+            description.Usernames.Add(user.Username);
+            description.DisplayNames.Add(user.DisplayName);
+        }
+
+        return description;
     }
 
     private SimAction Read(string operation, IMessage request)

@@ -5,7 +5,7 @@ namespace Monze.Simulator;
 /// <summary>
 /// Thread-safe in-memory model of the Mezon platform state Monze reads and
 /// changes: users, clans (with owner and welcome channel), channels, clan
-/// membership with join time and roles, roles, voice occupancy and channel
+/// membership with join time and roles, roles, voice occupancy, bot direct-message channels and channel
 /// messages. Seed it with the builder methods (<see cref="WithBot"/>,
 /// <see cref="User"/>, <see cref="Clan"/>); the simulator answers API calls
 /// from it and records every change the bot makes. The bot identity is a
@@ -22,6 +22,7 @@ public sealed class SimWorld
     private readonly Dictionary<long, SimRole> _roles = [];
     private readonly Dictionary<long, HashSet<long>> _voice = [];
     private readonly Dictionary<long, SimMessage> _messages = [];
+    private readonly Dictionary<long, long> _directPeers = [];
     private long _nextId = GeneratedIdBase;
     private SimBotIdentity? _bot;
 
@@ -107,6 +108,58 @@ public sealed class SimWorld
         }
 
         return new SimClanBuilder(this, id);
+    }
+
+    /// <summary>
+    /// Adds a direct-message channel between the bot and an existing user.
+    /// It has clan id 0, channel type Dm and is private, as on the platform.
+    /// </summary>
+    public SimWorld DirectChannel(long channelId, long userId)
+    {
+        RequirePositive(channelId, nameof(channelId));
+        lock (_gate)
+        {
+            if (_bot is null)
+            {
+                throw new InvalidOperationException("Call SimWorld.WithBot before adding direct-message channels.");
+            }
+
+            if (!_users.TryGetValue(userId, out var user))
+            {
+                throw new ArgumentException($"User {userId} must be added with User() first.", nameof(userId));
+            }
+
+            if (_channels.ContainsKey(channelId))
+            {
+                throw new ArgumentException($"Channel {channelId} already exists.", nameof(channelId));
+            }
+
+            _channels[channelId] = new SimChannel(channelId, 0, user.Username, (int)ChannelType.Dm, true, 0, 0, userId);
+            _directPeers[channelId] = userId;
+        }
+
+        return this;
+    }
+
+    /// <summary>The user on the other side of a bot direct-message channel, or null.</summary>
+    public long? DirectPeer(long channelId)
+    {
+        lock (_gate)
+        {
+            return _directPeers.TryGetValue(channelId, out var userId) ? userId : null;
+        }
+    }
+
+    /// <summary>The bot's direct-message channels, ordered by id.</summary>
+    public IReadOnlyList<SimChannel> DirectChannels
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _directPeers.Keys.Order().Select(id => _channels[id]).ToList();
+            }
+        }
     }
 
     /// <summary>Returns a new id above every seeded id (messages, generated events).</summary>

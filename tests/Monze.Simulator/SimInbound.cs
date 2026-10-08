@@ -332,6 +332,84 @@ public sealed class SimInbound
             Draft(SimPushKind.ChannelDeletedEvent, clanId, channelId, 0, 0));
     }
 
+    /// <summary>
+    /// The peer of a direct-message channel (<see cref="SimWorld.DirectChannel"/>)
+    /// writes to the bot. The message has clan id 0, stream mode Dm and is not
+    /// public; it reaches every bot session (no ClanJoin is needed).
+    /// </summary>
+    public Task<SimPush> SayDirectAsync(long channelId, long userId, string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        if (World.DirectPeer(channelId) != userId)
+        {
+            throw new ArgumentException($"Channel {channelId} is not a direct-message channel of user {userId}.", nameof(channelId));
+        }
+
+        var message = World.StoreMessage(new SimMessage(
+            World.NextId(),
+            0,
+            channelId,
+            userId,
+            MessageContent.CreateText(text).ToJson(),
+            0,
+            World.Time.GetUtcNow(),
+            null,
+            [],
+            false,
+            null,
+            0,
+            false));
+        return _simulator.PushAsync(
+            SimPushKind.ChannelMessage,
+            new Envelope { ChannelMessage = _simulator.ToChannelMessage(message) },
+            static _ => true,
+            new SimAction
+            {
+                Kind = SimActionKind.Push,
+                Operation = nameof(SimPushKind.ChannelMessage),
+                ChannelId = channelId,
+                MessageId = message.Id,
+                TargetUserId = userId,
+                ContentJson = message.ContentJson
+            });
+    }
+
+    /// <summary>
+    /// Sends a MessageButtonClicked exactly as a (possibly malicious) client
+    /// can put it on the wire. mezon-api MessageButtonClick
+    /// (server/api_interactive_message.go) forwards the client's event
+    /// unchanged to the notification stream of <paramref name="senderId"/>:
+    /// message, channel, user and button ids and extra_data are not checked
+    /// (DropdownBoxSelected, in contrast, overwrites user_id with the session
+    /// user). The event reaches the bot only when <paramref name="senderId"/>
+    /// is the bot. Use <see cref="ClickButtonAsync"/> for an honest client.
+    /// </summary>
+    public Task<SimPush> ForgeButtonClickAsync(
+        long channelId,
+        long messageId,
+        long senderId,
+        long userId,
+        string buttonId,
+        string? extraData = null)
+    {
+        ArgumentNullException.ThrowIfNull(buttonId);
+        var click = new MessageButtonClicked
+        {
+            MessageId = messageId,
+            ChannelId = channelId,
+            ButtonId = buttonId,
+            SenderId = senderId,
+            UserId = userId,
+            ExtraData = extraData ?? string.Empty
+        };
+        var botId = World.Bot.Id;
+        return _simulator.PushAsync(
+            SimPushKind.MessageButtonClicked,
+            new Envelope { MessageButtonClicked = click },
+            _ => senderId == botId,
+            Draft(SimPushKind.MessageButtonClicked, World.FindChannel(channelId)?.ClanId ?? 0, channelId, messageId, userId));
+    }
+
     /// <summary>Delivers pushes held back by a reorder fault without waiting for the next push.</summary>
     public Task<int> ReleaseHeldPushesAsync() => _simulator.ReleaseHeldAsync();
 

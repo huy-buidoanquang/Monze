@@ -323,6 +323,12 @@ public sealed partial class SimTransporter
             return MezonStatusCode.NotFound;
         }
 
+        // The bot is a participant of every direct-message channel it has.
+        if (World.DirectPeer(channel.Id) is not null)
+        {
+            return null;
+        }
+
         return World.IsMember(channel.ClanId, BotId) ? null : MezonStatusCode.PermissionDenied;
     }
 

@@ -28,13 +28,14 @@
 //
 // Modelled: REST login; socket connect/disconnect/server close; heartbeat;
 // ListClanDescs, ListChannelDescs (clan channels; channel type 0/1 lists all,
-// DMs are empty), ListChannelDetail, ListClanUsers, ListChannelMessages
+// clan 0 lists bot DM channels), ListChannelDetail, ListClanUsers, ListChannelMessages
 // (direction 1 = anchor and newer), ListChannelVoiceUsers (occupied rooms),
 // ListRoles, UpdateRole (role holders only), UpdateChannelMessage,
 // SessionRefresh; ClanJoin (gates clan-scoped pushes), ChannelJoin/Leave
 // (recorded), ChannelMessageSend (stored, acked, echoed to the clan stream),
 // EphemeralMessageSend codes 12/14/15, ChannelMessageRemove; pushes for
-// ChannelMessage, MessageButtonClicked, DropdownBoxSelected, AddClanUserEvent,
+// ChannelMessage (clan or DM), MessageButtonClicked (honest or forged, as
+// mezon-api forwards it unchanged), DropdownBoxSelected, AddClanUserEvent,
 // Voice joined/leaved/ended and Channel created/updated/deleted; faults
 // (delay, error, dropped ack, socket close, refused handshake, duplicate,
 // reordered and dropped pushes).
@@ -42,7 +43,7 @@
 // Not modelled (fails closed or is refused): every other socket API and
 // realtime envelope (recorded in SimRecorder.UnmodelledCalls and answered
 // with Unimplemented or not at all); Agent SSE (own HttpClient, Configure
-// refuses a non-empty AgentEventUrl); direct messages; role metadata and
+// refuses a non-empty AgentEventUrl); group DMs and the echo of bot DM sends; role metadata and
 // permission edits; channel permissions beyond clan membership; paging
 // cursors; echo of message updates and deletes; MMN/ZK.
 using System.Security.Cryptography;

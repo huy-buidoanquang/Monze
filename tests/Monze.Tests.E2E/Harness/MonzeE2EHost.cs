@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Monze.Simulator;
 using Monze.Testing;
 using Monze.Testing.Postgres;
@@ -34,17 +35,38 @@ internal sealed class MonzeE2EHost : IAsyncDisposable
 
     public IServiceProvider Services => _host.Services;
 
-    /// <summary>Creates and migrates a database, starts Monze on the simulator and waits until it joined the clans.</summary>
+    /// <summary>
+    /// Creates and migrates a database, starts Monze on the simulator and
+    /// waits until it joined the clans. <paramref name="configuration"/>
+    /// overrides the in-memory configuration (for example secret canaries or
+    /// rate-limit buckets), <paramref name="services"/> replaces registrations
+    /// after production composition, and <paramref name="seed"/> writes to the
+    /// migrated database before the host starts; <paramref name="timings"/>
+    /// adjusts the short E2E worker timings.
+    /// </summary>
     public static async Task<MonzeE2EHost> StartAsync(
         SimWorld world,
         string tag,
         MezonSimulatorOptions? simulatorOptions = null,
-        Action<SimFaultPlan>? faults = null)
+        Action<SimFaultPlan>? faults = null,
+        IReadOnlyDictionary<string, string?>? configuration = null,
+        Action<IServiceCollection>? services = null,
+        Func<CampaignDatabase, Task>? seed = null,
+        Func<MonzeWorkerTimings, MonzeWorkerTimings>? timings = null)
         => new(await SimulatedMonzeHost.StartAsync(
             world,
             TestPostgres.ConnectionString,
             $"e2e_{tag}",
-            new SimulatedMonzeHostOptions { Simulator = simulatorOptions, Faults = faults, StartTimeout = StartTimeout }));
+            new SimulatedMonzeHostOptions
+            {
+                Simulator = simulatorOptions,
+                Faults = faults,
+                Configuration = configuration ?? new Dictionary<string, string?>(),
+                Services = services,
+                SeedAsync = seed,
+                Timings = timings,
+                StartTimeout = StartTimeout
+            }));
 
     public Task<string> WaitForCommandStatusAsync(long clanId, long channelId, long messageId, TimeSpan timeout)
         => _host.WaitForCommandStatusAsync(clanId, channelId, messageId, timeout);
@@ -66,7 +88,14 @@ internal sealed class MonzeE2EHost : IAsyncDisposable
     /// Stops the host (MonzeBot disconnects, workers drain) but keeps the
     /// simulator, logs and database, so a test can assert a clean shutdown.
     /// </summary>
-    public Task StopHostAsync() => _host.StopHostAsync();
+    public Task StopHostAsync()
+    {
+        IsStopped = true;
+        return _host.StopHostAsync();
+    }
+
+    /// <summary>Whether <see cref="StopHostAsync"/> was called (workers are expected to have exited).</summary>
+    public bool IsStopped { get; private set; }
 
     public ValueTask DisposeAsync() => _host.DisposeAsync();
 }
