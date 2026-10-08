@@ -14,6 +14,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Monze.Domain\Monze.Domain.csproj" />
     <ProjectReference Include="..\..\Monze.Application\Monze.Application.csproj" />
+    <ProjectReference Include="..\..\Monze.csproj" />
     <ProjectReference Include="..\Monze.Testing\Monze.Testing.csproj" />
   </ItemGroup>
 </Project>

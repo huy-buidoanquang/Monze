@@ -475,6 +475,7 @@
       "monze.testing": {
         "type": "Project",
         "dependencies": {
+          "Monze.Application": "[1.0.0, )",
           "Npgsql": "[10.0.0, )",
           "xunit.extensibility.core": "[2.9.3, )"
         }

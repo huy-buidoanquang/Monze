@@ -10,4 +10,7 @@
     <PackageReference Include="Npgsql" Version="10.0.0" />
     <PackageReference Include="xunit.extensibility.core" Version="2.9.3" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Monze.Application\Monze.Application.csproj" />
+  </ItemGroup>
 </Project>
