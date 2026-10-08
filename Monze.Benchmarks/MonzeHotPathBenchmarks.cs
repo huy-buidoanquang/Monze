@@ -15,6 +15,7 @@ public class MonzeHotPathBenchmarks
     private CommandArguments _commandArguments;
     private MonzeCommandRateLimiter _rateLimiter = null!;
     private DateTimeOffset _rateLimitNow;
+    private long _failedWrites;
 
     [GlobalSetup]
     public void Setup()
@@ -34,24 +35,45 @@ public class MonzeHotPathBenchmarks
             MaxEntries: 16));
         _rateLimitNow = DateTimeOffset.UtcNow;
         _rateLimiter.TryAcquire(206, 1001, MonzeCommandNames.Role, _rateLimitNow, out _);
-        _reader = _queue.GetReader(0);
+        // Read the lane the key is written to; reading another lane lets the
+        // written lane fill up so TryWrite measures the rejection path (DEF-02).
+        _reader = _queue.GetReader(_queue.GetPartition(_envelope.ClanId));
         _queue.TryWrite(_envelope.ClanId, _envelope);
         _reader.TryRead(out _);
+        _failedWrites = 0;
+    }
+
+    [GlobalCleanup(Target = nameof(PartitionedIngressTryWrite))]
+    public void VerifyEveryWriteSucceeded()
+    {
+        if (_failedWrites > 0)
+        {
+            throw new InvalidOperationException(
+                $"{_failedWrites} ingress writes were rejected; the benchmark did not measure the accepted path.");
+        }
     }
 
     [Benchmark]
+    [ZeroAllocationGate]
     public bool PartitionedIngressTryWrite()
     {
         var written = _queue.TryWrite(_envelope.ClanId, _envelope);
+        if (!written)
+        {
+            _failedWrites++;
+        }
+
         _reader.TryRead(out _);
         return written;
     }
 
     [Benchmark]
+    [ZeroAllocationGate]
     public string CommandArgumentsSingleItem()
         => _commandArguments.Slice(0).Join(' ');
 
     [Benchmark]
+    [ZeroAllocationGate]
     public bool CommandRateLimitKnownKey()
         => _rateLimiter.TryAcquire(
             206,

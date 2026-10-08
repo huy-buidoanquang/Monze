@@ -49,7 +49,7 @@ Set-Location $repo
 $profileName = if ($Full -and $Soak) { 'full-soak' } elseif ($Full) { 'full' } elseif ($Deep) { 'deep' } elseif ($Soak) { 'soak' } else { 'quick' }
 $allTiers = @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'component', 'load', 'k6', 'capacity', 'chaos', 'soak', 'live')
 # Tiers whose runners exist in this revision. Later commits add to this list.
-$implemented = @('build', 'inventory', 'unit', 'integration')
+$implemented = @('build', 'inventory', 'unit', 'integration', 'micro')
 $profileTiers = switch ($profileName) {
     'quick' { @('build', 'inventory', 'unit', 'property', 'integration', 'e2e', 'micro', 'load', 'capacity', 'chaos') }
     'deep' { @('build', 'inventory', 'unit', 'property', 'integration', 'e2e') }
@@ -66,7 +66,7 @@ $campaignId = if ($Resume -and $CampaignDir) { Split-Path -Leaf $CampaignDir } e
 if (-not $CampaignDir) { $CampaignDir = Join-Path $repo "docs/test-artifacts/$campaignId-campaign" }
 $CampaignDir = [IO.Path]::GetFullPath($CampaignDir)
 $raw = Join-Path $CampaignDir 'raw'
-foreach ($sub in 'trx', 'coverage', 'ledgers', 'logs', 'testresults', 'bdn', 'redaction') {
+foreach ($sub in 'trx', 'coverage', 'ledgers', 'logs', 'testresults', 'bdn', 'micro', 'redaction') {
     New-Item -ItemType Directory -Force -Path (Join-Path $raw $sub) | Out-Null
 }
 $label = "monze.campaign=$campaignId"
@@ -160,6 +160,31 @@ function Invoke-TestTier {
     $status = if ($counts.Failed -gt 0 -or $run.ExitCode -ne 0) { 'FAIL' } else { 'PASS' }
     if ($Strict -and $counts.Skipped -gt 0) { $status = 'FAIL'; $note += ' (tier strict không được có test skip)' }
     if ($counts.Total -eq 0) { $status = 'FAIL'; $note = 'Không có test nào chạy' }
+    return @{ Status = $status; Note = $note; Exit = $run.ExitCode; Command = $run.Command; Seconds = $watch.Elapsed.TotalSeconds }
+}
+
+function Invoke-MicroTier {
+    param([string[]]$Filters, [int]$TimeoutMinutes)
+    # BenchmarkDotNet builds and runs its generated projects outside the repo
+    # (artifacts under the campaign temp folder); only the JSON reports and the
+    # gate artifact are kept in raw/.
+    $bdn = Join-Path $tempRoot 'bdn'
+    $artifact = Join-Path $raw 'micro/micro.json'
+    $arguments = @((Join-Path $repo 'Monze.Benchmarks/bin/Release/net10.0/Monze.Benchmarks.dll'), '--filter') + $Filters +
+        @('--artifacts', $bdn, '--exporters', 'json', '--campaign-artifact', $artifact, '--baseline', (Join-Path $repo 'tests/perf-baseline.json'))
+    if ($UpdatePerfBaseline) { $arguments += '--update-baseline' }
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    $run = Invoke-Logged -Name 'micro' -File 'dotnet' -Arguments $arguments -TimeoutMinutes $TimeoutMinutes
+    $watch.Stop()
+    foreach ($report in @(Get-ChildItem -Path $bdn -Filter '*-report-full*.json' -Recurse -ErrorAction SilentlyContinue)) {
+        Copy-Item $report.FullName (Join-Path $raw "bdn/$($report.Name)") -Force
+    }
+
+    if ($run.TimedOut) { return @{ Status = 'TIMEOUT'; Note = "Quá $TimeoutMinutes phút"; Exit = $null; Command = $run.Command; Seconds = $watch.Elapsed.TotalSeconds } }
+    if (-not (Test-Path $artifact)) { return @{ Status = 'ERROR'; Note = 'Không có artifact micro (xem raw/logs/micro*.log)'; Exit = $run.ExitCode; Command = $run.Command; Seconds = $watch.Elapsed.TotalSeconds } }
+    $micro = Get-Content -Raw $artifact | ConvertFrom-Json
+    $status = switch ($micro.verdict) { 'PASS' { 'PASS' } 'BLOCKED' { 'BLOCKED' } default { 'FAIL' } }
+    $note = "$($micro.metrics.benchmarks) benchmark, $($micro.metrics.zeroAllocationGates) gate 0 B/op, $($micro.metrics.meanRegressions) mean vượt 1,2 × baseline"
     return @{ Status = $status; Note = $note; Exit = $run.ExitCode; Command = $run.Command; Seconds = $watch.Elapsed.TotalSeconds }
 }
 
@@ -317,6 +342,14 @@ try {
                 finally {
                     Remove-Item Env:MONZE_TEST_POSTGRES, Env:MONZE_REDIS_CONNECTION -ErrorAction SilentlyContinue
                 }
+            }
+            'micro' {
+                # Quick runs the classes that hold the 0 B/op gates; other profiles run every micro benchmark.
+                $filters = if ($profileName -eq 'quick') {
+                    @('*MonzeHotPathBenchmarks*', '*IngressCallbackBenchmarks*', '*MonzeCacheHotPathBenchmarks*', '*MonzeMetricsBenchmarks*', '*RateLimiterBenchmarks*')
+                }
+                else { @('*') }
+                $result = Invoke-MicroTier -Filters $filters -TimeoutMinutes $(if ($profileName -eq 'quick') { 20 } else { 60 })
             }
         }
 

@@ -24,6 +24,7 @@ public class MonzeCacheHotPathBenchmarks
     }
 
     [Benchmark]
+    [ZeroAllocationGate]
     public bool L1TypedKeyHit()
         => _cache.TryGet(_key, out ReadModelCacheEntry value)
             && value.Version == _expected.Version;

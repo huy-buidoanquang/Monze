@@ -74,7 +74,8 @@ public sealed class PartitionedIngressQueue<T> : IEventIngressQueue<T>
         }
     }
 
-    private int GetPartition(long key)
+    /// <summary>The lane that <see cref="TryWrite"/> uses for <paramref name="key"/>.</summary>
+    public int GetPartition(long key)
     {
         var hash = (ulong)key;
         hash ^= hash >> 33;

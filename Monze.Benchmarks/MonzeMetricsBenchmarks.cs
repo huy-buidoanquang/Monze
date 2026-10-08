@@ -54,10 +54,12 @@ public class MonzeMetricsBenchmarks
     public void CleanupTag() => _listener.Dispose();
 
     [Benchmark]
+    [ZeroAllocationGate]
     public Task UpstreamRateLimitCallback()
         => MonzeMetrics.RecordUpstreamRateLimit(_rateLimit);
 
     [Benchmark]
+    [ZeroAllocationGate]
     public void CommandInflightAndDuration()
     {
         MonzeMetrics.CommandInflight.Add(1);
@@ -66,6 +68,7 @@ public class MonzeMetricsBenchmarks
     }
 
     [Benchmark]
+    [ZeroAllocationGate]
     public string CommandModuleTag()
         => MonzeCommandMetricTags.Module("AVA");
 
