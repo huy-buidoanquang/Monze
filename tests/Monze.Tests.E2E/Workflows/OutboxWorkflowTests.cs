@@ -1,3 +1,6 @@
+using Microsoft.Extensions.DependencyInjection;
+using Monze.Application;
+using Monze.Infrastructure.Persistence;
 using Monze.Simulator;
 using Monze.Testing;
 using Monze.Tests.E2E.Harness;
@@ -72,6 +75,62 @@ public sealed class OutboxWorkflowTests(ITestOutputHelper output)
 
         Assert.Equal(delivered, await host.ScalarAsync<long>("SELECT external_message_id FROM outbox_delivery WHERE dedupe_key = 'e2e-lost-0001';"));
         Assert.Equal(1, Delivered(host, "lost", 1));
+        await E2EOracles.AssertAsync(host, mark, new ScenarioExpectation { OtherOutputs = 1 });
+        await E2EOracles.AssertInvariantsAsync(host);
+    }
+
+    /// <summary>
+    /// DEF-07 on a busy channel: when a lost completion is reconciled, more
+    /// than a page (100) of newer messages sit on top of the delivered one.
+    /// Reconciliation pages back through the history and still finds it,
+    /// where it used to read only the latest 100 and resend the message.
+    /// </summary>
+    [DbFact]
+    [Req("REQ-OUT-001")]
+    public async Task A_lost_completion_is_found_behind_a_page_of_newer_messages()
+    {
+        await using var host = await E2EActions.StartAsync("wf_outbox_deep");
+        await InsertAnnouncementsAsync(host, "deep", 1);
+        await E2EActions.WaitUntilAsync(host, async () => await StatusAsync(host, "deep", 1) == "sent", "the row to be sent");
+        var delivered = await host.ScalarAsync<long>("SELECT external_message_id FROM outbox_delivery WHERE dedupe_key = 'e2e-deep-0001';");
+        for (var i = 0; i < 150; i++)
+        {
+            await host.Inbound.SayAsync(ClanId, GeneralId, MemberId, $"tin nhắn {i}");
+        }
+
+        await host.ScalarAsync<int>("UPDATE outbox_delivery SET status = 'sending', external_message_id = NULL, lease_token = 'lost', locked_until = now() - interval '1 second' WHERE dedupe_key = 'e2e-deep-0001' RETURNING 1;");
+        await E2EActions.WaitUntilAsync(host, async () => await StatusAsync(host, "deep", 1) == "sent", "the row to be reconciled as sent");
+
+        Assert.Equal(delivered, await host.ScalarAsync<long>("SELECT external_message_id FROM outbox_delivery WHERE dedupe_key = 'e2e-deep-0001';"));
+        Assert.Equal(1, Delivered(host, "deep", 1));
+        await E2EOracles.AssertInvariantsAsync(host);
+    }
+
+    /// <summary>
+    /// DEF-07 under a slow or briefly unreachable database (chaos PG-04b,
+    /// PG-06): the completion of an acked send fails twice. It is retried
+    /// while the row is still leased and recorded with the delivered
+    /// message's id, without leaving the send to reconciliation.
+    /// </summary>
+    [DbFact]
+    [Req("REQ-OUT-001")]
+    public async Task A_completion_that_fails_twice_is_retried_and_recorded()
+    {
+        var outbox = new FlakyCompletionOutbox(failures: 2);
+        await using var host = await E2EActions.StartAsync(
+            "wf_outbox_retry",
+            services: services => services.AddSingleton<IOutboxRepository>(provider =>
+            {
+                outbox.Inner = new PostgresOutboxRepository(provider.GetRequiredService<NpgsqlDataSource>());
+                return outbox;
+            }));
+        var mark = await E2EOracles.MarkAsync(host);
+        await InsertAnnouncementsAsync(host, "retry", 1);
+        await E2EActions.WaitUntilAsync(host, async () => await StatusAsync(host, "retry", 1) == "sent", "the row to be sent");
+
+        Assert.Equal(3, outbox.CompletionCalls);
+        var message = Assert.Single(host.World.MessagesIn(GeneralId), message => message.SenderId == host.World.Bot.Id && message.ContentJson.Contains("Notice e2e-retry-0001.", StringComparison.Ordinal));
+        Assert.Equal(message.Id, await host.ScalarAsync<long>("SELECT external_message_id FROM outbox_delivery WHERE dedupe_key = 'e2e-retry-0001';"));
         await E2EOracles.AssertAsync(host, mark, new ScenarioExpectation { OtherOutputs = 1 });
         await E2EOracles.AssertInvariantsAsync(host);
     }
@@ -211,4 +270,34 @@ public sealed class OutboxWorkflowTests(ITestOutputHelper output)
 
     private static int Delivered(MonzeE2EHost host, string dedupeKey)
         => host.World.MessagesIn(GeneralId).Count(message => message.SenderId == host.World.Bot.Id && message.ContentJson.Contains($"Notice {dedupeKey}.", StringComparison.Ordinal));
+
+    /// <summary>The first <c>failures</c> completions fail as an unreachable database would.</summary>
+    private sealed class FlakyCompletionOutbox(int failures) : IOutboxRepository
+    {
+        private int _calls;
+
+        public IOutboxRepository Inner { get; set; } = null!;
+
+        public int CompletionCalls => Volatile.Read(ref _calls);
+
+        public Task<IReadOnlyList<DueOutbox>> ClaimDueOutboxAsync(CancellationToken cancellationToken, long? clanId = null, int limit = 256)
+            => Inner.ClaimDueOutboxAsync(cancellationToken, clanId, limit);
+
+        public Task RenewOutboxLeasesAsync(IReadOnlyDictionary<long, string> leases, CancellationToken cancellationToken)
+            => Inner.RenewOutboxLeasesAsync(leases, cancellationToken);
+
+        public Task CompleteOutboxAsync(long id, string leaseToken, long? externalMessageId, bool failed, CancellationToken cancellationToken, string? errorCode = null, bool countsAsAttempt = true)
+            => Interlocked.Increment(ref _calls) <= failures
+                ? Task.FromException(new TimeoutException("Simulated database timeout."))
+                : Inner.CompleteOutboxAsync(id, leaseToken, externalMessageId, failed, cancellationToken, errorCode, countsAsAttempt);
+
+        public Task<IReadOnlyList<UncertainOutbox>> ClaimUncertainOutboxAsync(int limit, CancellationToken cancellationToken)
+            => Inner.ClaimUncertainOutboxAsync(limit, cancellationToken);
+
+        public Task RequeueUncertainOutboxAsync(long id, string leaseToken, CancellationToken cancellationToken)
+            => Inner.RequeueUncertainOutboxAsync(id, leaseToken, cancellationToken);
+
+        public Task<IReadOnlySet<long>> FindRecordedMessagesAsync(IReadOnlyList<long> messageIds, CancellationToken cancellationToken)
+            => Inner.FindRecordedMessagesAsync(messageIds, cancellationToken);
+    }
 }

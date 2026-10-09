@@ -67,6 +67,7 @@ public sealed partial class MonzeBot : BackgroundService
     private long _messageIngressDepth;
     private long _messageGapIngressDepth;
     private long _agentIngressDepth;
+    private AgentEventStream? _agentEvents;
     private long _welcomeIngressDepth;
     private long _agentPendingWriters;
     private long _welcomePendingWriters;
@@ -253,7 +254,9 @@ public sealed partial class MonzeBot : BackgroundService
                     TimeSpan.FromSeconds(Math.Clamp(_configuration.GetValue("Mezon:AgentSse:IdleTimeoutSeconds", 45), 1, 3600)),
                     _time,
                     _logger,
-                    RouteAgentEventAsync);
+                    RouteAgentEventAsync,
+                    Path.ChangeExtension(path, ".agent-cursor"));
+                _agentEvents = agentEvents;
                 await agentEvents.ConnectAsync(runtimeToken);
             }
 

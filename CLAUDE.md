@@ -78,7 +78,7 @@ The solution `Monze.slnx` targets net10.0 throughout.
 - It sets `AgentEventUrl` from `Mezon:AgentBaseUrl`.
 - SDK message history is kept in `SqliteMessageStore` under `Monze:SqliteDirectory` (default `data`).
 - Commands use the prefix `*` and the root `monze`. Buttons go through `router.OnButton`.
-- Monze reads Agent SSE through its own `AgentSseManager` and `HttpClient` (`Infrastructure/Agent/AgentEventStream.cs`), not `MezonClient.ConnectAgentSseAsync`. Reconnects send Last-Event-ID, and once the stream has sent two keepalives, silence of three keepalive gaps (at least `Mezon:AgentSse:IdleTimeoutSeconds`, default 45) ends it.
+- Monze reads Agent SSE through its own `AgentSseManager` and `HttpClient` (`Infrastructure/Agent/AgentEventStream.cs`), not `MezonClient.ConnectAgentSseAsync`. Reconnects send Last-Event-ID (also after a restart: the id is saved next to the message store as `<db>.agent-cursor`), and once the stream has sent two keepalives, silence of three keepalive gaps (at least `Mezon:AgentSse:IdleTimeoutSeconds`, default 45) ends it.
 - AI uses `OpenAiCompatibleProvider` when `Monze:Ai:BaseUrl` and its API key are set (default model `gpt-4o-mini`).
 - Redis is optional; without it Monze falls back to PostgreSQL.
 

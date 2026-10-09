@@ -25,6 +25,9 @@ internal sealed class MonzeL1Cache : IDisposable
             MaintenanceInterval);
     }
 
+    /// <summary>Eviction tokens waiting in the queue (tests).</summary>
+    internal int QueuedTokens => _evictionQueue.Count;
+
     public bool TryGet(MonzeCacheKey key, out ReadModelCacheEntry entry)
     {
         if (!_entries.TryGetValue(key, out var cached))
@@ -124,7 +127,25 @@ internal sealed class MonzeL1Cache : IDisposable
             }
         }
 
+        CompactEvictionQueue();
         TrimToLimit();
+    }
+
+    /// <summary>
+    /// Drops the tokens of entries that expired, were removed or were replaced
+    /// after they were queued. Every write queues a token and TrimToLimit only
+    /// dequeues while the cache is over its byte limit, so a cache that stays
+    /// under it would otherwise keep every token it ever queued (CAND-30).
+    /// </summary>
+    private void CompactEvictionQueue()
+    {
+        for (var pending = _evictionQueue.Count; pending > 0 && _evictionQueue.TryDequeue(out var token); pending--)
+        {
+            if (_entries.TryGetValue(token.Key, out var current) && current.Token == token.Token)
+            {
+                _evictionQueue.Enqueue(token);
+            }
+        }
     }
 
     private void TrimToLimit()

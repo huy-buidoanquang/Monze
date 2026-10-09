@@ -74,4 +74,38 @@ public sealed class MonzeL1CacheTests
 
         Assert.Equal(0, time.ActiveTimerCount);
     }
+
+    /// <summary>
+    /// Regression for CAND-30: every write queued an eviction token that was
+    /// only dequeued while the cache was over its 64 MiB limit, so a cache
+    /// below it kept the token of every replaced, expired or removed entry.
+    /// Maintenance now keeps only the tokens of live entries.
+    /// </summary>
+    [Fact]
+    public void Maintenance_drops_eviction_tokens_of_replaced_expired_and_removed_entries()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.UnixEpoch);
+        using var cache = new MonzeL1Cache(time);
+        var replaced = new MonzeCacheKey(42, "settings", "replaced");
+        for (var version = 1; version <= 1_000; version++)
+        {
+            cache.Set(replaced, new ReadModelCacheEntry(version, "payload"), TimeSpan.FromHours(1), 7);
+        }
+
+        for (var i = 0; i < 500; i++)
+        {
+            cache.Set(new MonzeCacheKey(42, "profile", "expired-" + i), new ReadModelCacheEntry(1, "payload"), TimeSpan.FromSeconds(10), 7);
+            var removed = new MonzeCacheKey(42, "profile", "removed-" + i);
+            cache.Set(removed, new ReadModelCacheEntry(1, "payload"), TimeSpan.FromHours(1), 7);
+            cache.Remove(removed);
+        }
+
+        Assert.Equal(2_000, cache.QueuedTokens);
+
+        time.Advance(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(1, cache.QueuedTokens);
+        Assert.True(cache.TryGet(replaced, out var entry));
+        Assert.Equal(1_000, entry.Version);
+    }
 }

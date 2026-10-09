@@ -92,9 +92,11 @@ mezon-api `bcc6e172` and the mezon-proto-server working tree of 2026-10-09.
   `HttpClient` (`Infrastructure/Agent/AgentEventStream.cs`).
   - After two keepalives, a stream silent for three keepalive gaps (at least
     `Mezon:AgentSse:IdleTimeoutSeconds`, default 45) is ended.
-  - Reconnects send the id of the last dispatched event.
+  - Reconnects send the id of the last dispatched event. The id is also
+    saved next to the message store once every event handed over was
+    processed, so the first connect after a restart resumes after it.
   - A server that sends no keepalives is never timed out.
-  - Regression: `AgentSseWorkflowTests` `A_half_open_stream_is_replaced_and_resumed_after_the_last_event`, `AgentSseResumeTests`.
+  - Regression: `AgentSseWorkflowTests` `A_half_open_stream_is_replaced_and_resumed_after_the_last_event`, `An_event_published_while_the_bot_is_down_is_replayed_after_a_restart`, `AgentSseResumeTests`.
 - **Still unverified on the live Agent server:**
   - its keepalive interval;
   - whether it writes `id:` fields and resumes after `Last-Event-ID`.

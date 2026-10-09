@@ -86,6 +86,33 @@ public sealed class AgentSseWorkflowTests
         await E2EOracles.AssertInvariantsAsync(host);
     }
 
+    /// <summary>
+    /// DEF-08 across a restart (chaos PR-01, PR-06): an Agent event published
+    /// while no instance is subscribed is replayed after the restart, which
+    /// resumes after the last event the stopped instance processed (the
+    /// cursor is saved next to the message store).
+    /// </summary>
+    [DbFact]
+    [Req("REQ-MTG-003")]
+    public async Task An_event_published_while_the_bot_is_down_is_replayed_after_a_restart()
+    {
+        await using var http = await E2EActions.HttpAsync();
+        await using var first = await E2EActions.StartAsync("wf_sse_restart", http: http);
+        await http.WaitForSseAsync(1, E2EOracles.Timeout);
+        await MeetingAgentWorkflowTests.MeetingNowAsync(first);
+        const string room = "sim-room-restart";
+        await http.PublishAgentEventAsync("room_started", room, VoiceId, ClanId);
+        await MeetingAgentWorkflowTests.WaitForStatusAsync(first, room, "live");
+        await first.StopHostAsync();
+
+        Assert.Equal(0, await http.PublishAgentEventAsync("room_ended", room, VoiceId, ClanId));
+        await using var second = await E2EActions.StartAsync("wf_sse_restart_2", database: first.Database, simulator: first.Simulator, dataDirectory: first.DataDirectory, http: http);
+        await MeetingAgentWorkflowTests.WaitForStatusAsync(second, room, "summary_pending");
+
+        Assert.True(http.Requests.Last(static request => request.Route == SimHttpRoute.AgentSse).HadLastEventId);
+        await E2EOracles.AssertInvariantsAsync(second);
+    }
+
     [DbFact]
     [Req("REQ-MTG-003", "REQ-MTG-004")]
     public async Task Duplicate_reordered_malformed_foreign_oversized_and_empty_events_apply_once()

@@ -13,6 +13,7 @@ internal sealed class AgentEventStream : IAsyncDisposable
 {
     private readonly HttpClient _http;
     private readonly AgentSseManager _manager;
+    private readonly AgentSseResumeState _state;
 
     public AgentEventStream(
         string baseUrl,
@@ -21,9 +22,10 @@ internal sealed class AgentEventStream : IAsyncDisposable
         TimeSpan idleTimeout,
         TimeProvider time,
         ILogger logger,
-        Func<AgentSseSessionEvent, Task> onEvent)
+        Func<AgentSseSessionEvent, Task> onEvent,
+        string? cursorPath = null)
     {
-        var state = new AgentSseResumeState(idleTimeout);
+        var state = _state = new AgentSseResumeState(idleTimeout, cursorPath);
         // An ended stream's connection is closed at once instead of being
         // drained for reuse (a half-open one would only time out the drain).
         var transport = new SocketsHttpHandler { ResponseDrainTimeout = TimeSpan.Zero, MaxResponseDrainSize = 0 };
@@ -36,6 +38,9 @@ internal sealed class AgentEventStream : IAsyncDisposable
     }
 
     public Task ConnectAsync(CancellationToken cancellationToken) => _manager.ConnectAsync(cancellationToken);
+
+    /// <summary>Saves the resume cursor (<see cref="AgentSseResumeState.Save"/>): only once every event handed over was processed.</summary>
+    public void SaveCursor() => _state.Save();
 
     public async ValueTask DisposeAsync()
     {

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Mezon.Net.Models;
 using Mezon.Net.Sdk;
 using Microsoft.Extensions.Logging;
 using Monze.Application;
@@ -10,6 +11,7 @@ public sealed partial class MonzeBot
 {
     private const int ReconcileBatch = 20;
     private const int ReconcileHistory = 100;
+    private const int ReconcilePages = 5;
 
     /// <summary>
     /// Settles outbox rows whose delivery is uncertain. The channel's latest
@@ -17,14 +19,18 @@ public sealed partial class MonzeBot
     /// row was sent with, not yet recorded by another row and created no
     /// earlier than a minute before the row's due time (an expired lease keeps
     /// the due time its send started after; a lost ack is due 30 s after the
-    /// send failed, and the SDK gives up on an ack after 7 s). Found: the row
-    /// is completed with that message id. Absent: the message never reached
-    /// the channel and the row is resent. A history read that fails leaves
-    /// the row leased; it is tried again once the lease expires.
+    /// send failed, and the SDK gives up on an ack after 7 s). The history is
+    /// paged back to that time, at most <see cref="ReconcilePages"/> pages of
+    /// <see cref="ReconcileHistory"/> per channel and pass, so a message a busy
+    /// channel has pushed past its latest 100 is still found (DEF-07). Found:
+    /// the row is completed with that message id. Absent: the message never
+    /// reached the channel and the row is resent. A history read that fails
+    /// leaves the row leased; it is tried again once the lease expires.
     /// </summary>
     private async Task ReconcileUncertainOutboxAsync(MezonClient client, CancellationToken cancellationToken)
     {
         var rows = await _outbox.ClaimUncertainOutboxAsync(ReconcileBatch, cancellationToken);
+        var histories = new Dictionary<long, ChannelHistory>();
         foreach (var row in rows)
         {
             var item = row.Item;
@@ -33,12 +39,15 @@ public sealed partial class MonzeBot
             var candidates = new List<long>();
             try
             {
-                var history = await client.ListChannelMessagesAsync(row.ClanId, item.ChannelId, limit: ReconcileHistory);
-                for (var i = 0; i < history.Messages.Count; i++)
+                if (!histories.TryGetValue(item.ChannelId, out var history))
                 {
-                    var message = history.Messages[i];
+                    histories[item.ChannelId] = history = new ChannelHistory(row.ClanId, item.ChannelId);
+                }
+
+                await history.ReachAsync(client, notBefore);
+                foreach (var message in history.Messages)
+                {
                     if (message.SenderId == client.BotId
-                        && message.MessageId > 0
                         && (message.CreateTimeSeconds <= 0 || message.CreateTimeSeconds >= notBefore)
                         && Canonical(message.Content) == expected)
                     {
@@ -64,6 +73,44 @@ public sealed partial class MonzeBot
             {
                 _logger.LogInformation("Outbox {OutboxId} is not on its channel; it will be resent.", item.Id);
                 await _outbox.RequeueUncertainOutboxAsync(item.Id, item.LeaseToken, cancellationToken);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A channel's latest messages, newest first, paged back on demand as far
+    /// as the rows of one reconciliation pass need.
+    /// </summary>
+    private sealed class ChannelHistory(long clanId, long channelId)
+    {
+        private readonly HashSet<long> _seen = [];
+        private int _pages;
+        private bool _complete;
+
+        public List<ChannelMessageResponse> Messages { get; } = [];
+
+        /// <summary>Pages back until a message older than <paramref name="notBefore"/> (Unix seconds), the channel's start or the page cap.</summary>
+        public async Task ReachAsync(MezonClient client, long notBefore)
+        {
+            while (!_complete
+                && _pages < ReconcilePages
+                && !Messages.Exists(message => message.CreateTimeSeconds > 0 && message.CreateTimeSeconds < notBefore))
+            {
+                // Direction 3 lists the anchor's older messages (mezon-api BEFORE_TIMESTAMP).
+                long? anchor = Messages.Count == 0 ? null : Messages[^1].MessageId;
+                var page = await client.ListChannelMessagesAsync(clanId, channelId, anchor, anchor is null ? null : 3, ReconcileHistory);
+                _pages++;
+                var added = 0;
+                foreach (var message in page.Messages.OrderByDescending(static message => message.MessageId))
+                {
+                    if (message.MessageId > 0 && (anchor is null || message.MessageId < anchor) && _seen.Add(message.MessageId))
+                    {
+                        Messages.Add(message);
+                        added++;
+                    }
+                }
+
+                _complete = page.Messages.Count < ReconcileHistory || added == 0;
             }
         }
     }

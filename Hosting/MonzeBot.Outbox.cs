@@ -17,6 +17,9 @@ public sealed partial class MonzeBot
     /// <summary>How often the 60 s leases of rows still being delivered are extended.</summary>
     private static readonly TimeSpan OutboxLeaseRenewal = TimeSpan.FromSeconds(20);
 
+    /// <summary>Writes of a delivery's outcome, 1, 2, 4 and 8 s apart (TryCompleteOutboxAsync).</summary>
+    private const int OutboxCompletionAttempts = 5;
+
     /// <summary>
     /// Delivers due outbox rows as a pipeline: up to Monze:Outbox:MaxConcurrency
     /// deliveries run at once, and once half of them have finished the free
@@ -337,7 +340,10 @@ public sealed partial class MonzeBot
     /// not on the worker's stopping token: an acked message whose completion
     /// is dropped at shutdown would stay leased and be reconciled or resent
     /// (WF-05), and a timeout while the bot runs would do the same whenever
-    /// the database is slow.
+    /// the database is slow. A failed write is retried a few times while this
+    /// process still holds the row (the worker renews its lease), so a briefly
+    /// unreachable database does not leave an acked send to reconciliation,
+    /// which may no longer find it in the channel history (DEF-07).
     /// </summary>
     private async Task TryCompleteOutboxAsync(
         long id,
@@ -348,20 +354,42 @@ public sealed partial class MonzeBot
         bool countsAsAttempt = true)
     {
         using var timeout = NewOutcomeTimeout();
-        try
+        var delay = TimeSpan.FromSeconds(1);
+        for (var attempt = 1; ; attempt++)
         {
-            await _outbox.CompleteOutboxAsync(
-                id,
-                leaseToken,
-                externalMessageId,
-                failed,
-                timeout.Token,
-                errorCode,
-                countsAsAttempt);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Outbox {OutboxId} completion failed; the row is reconciled once its lease expires.", id);
+            try
+            {
+                await _outbox.CompleteOutboxAsync(
+                    id,
+                    leaseToken,
+                    externalMessageId,
+                    failed,
+                    timeout.Token,
+                    errorCode,
+                    countsAsAttempt);
+                return;
+            }
+            catch (Exception ex) when (attempt < OutboxCompletionAttempts && !timeout.Token.IsCancellationRequested)
+            {
+                _logger.LogDebug(ex, "Outbox {OutboxId} completion failed; retrying.", id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Outbox {OutboxId} completion failed; the row is reconciled once its lease expires.", id);
+                return;
+            }
+
+            try
+            {
+                await Task.Delay(delay, _time, timeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("Outbox {OutboxId} completion was not recorded before the bot stopped; the row is reconciled once its lease expires.", id);
+                return;
+            }
+
+            delay *= 2;
         }
     }
 
