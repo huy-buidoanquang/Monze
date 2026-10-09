@@ -31,6 +31,7 @@ git diff --check
 - Redis tests (`[RedisFact]`) use `MONZE_REDIS_CONNECTION` under the same guard (loopback, not port 6379). `[DockerFact]` tests run only in a strict campaign.
 - Test projects: `Monze.Tests` (unit, contract, inventory), `tests/Monze.Tests.Property` (CsCheck generators), `tests/Monze.Tests.Integration` (database and Redis), `tests/Monze.Tests.E2E` (the real host on the offline Mezon simulator in `tests/Monze.Simulator`), `tests/Monze.Campaign` (component, load, k6, capacity, chaos and soak runner) and `tests/Monze.TestReport` (report builder). Shared helpers are in `tests/Monze.Testing`.
 - Every known-defect marker (`KnownDefect.ExpectFailure*`, `KnownGap`, `PropertyResult.Known`) must be registered in `tests/traceability/expected-gaps.json`; `[Req]` ids must exist in `tests/traceability/requirements.json`. The inventory tests enforce both.
+- Coverage floors per assembly are in `tests/coverage-thresholds.json`: the report fails G1 when a run with the unit, property, integration and e2e tiers drops below one. Raise a floor when coverage grows; never lower it.
 
 ### Test campaign
 - `pwsh scripts/run-test-campaign.ps1` runs the quick profile (about 15–30 minutes); `-Full` adds every micro benchmark, the full load matrix, k6, all chaos scenarios and a 10-minute soak; `-Full -Soak` makes the soak `-SoakMinutes` long (default 120, needed for G4); `-Tiers a,b` selects tiers; `-Deep` scales the property generators.

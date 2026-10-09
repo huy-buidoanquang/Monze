@@ -261,6 +261,34 @@ internal sealed class ReportRenderer
         md.AppendLine();
         md.AppendLine($"Gộp từ mọi file cobertura của lần chạy theo (assembly, file, dòng); nhánh gộp là xấp xỉ. {N(coverage.SourceFiles)} file nguồn.");
         md.AppendLine();
+        if (_model.CoverageThresholds.Count > 0)
+        {
+            // Floors: tests/coverage-thresholds.json (raised as coverage grows, never lowered).
+            var apply = GateEvaluator.CoverageFloorsApply(_model);
+            md.AppendLine("### Ngưỡng coverage");
+            md.AppendLine();
+            md.AppendLine("| Assembly | Line: đo / ngưỡng / mục tiêu | Branch: đo / ngưỡng / mục tiêu | Verdict |");
+            md.AppendLine("|---|---|---|---|");
+            foreach (var (name, threshold) in _model.CoverageThresholds.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+            {
+                var measured = coverage.Assemblies.FirstOrDefault(a => a.Assembly == name);
+                var line = measured?.LineRate ?? 0;
+                var branch = measured?.BranchRate ?? 0;
+                var verdict = !apply
+                    ? "— không áp dụng"
+                    : line * 100 < threshold.Line || branch * 100 < threshold.Branch
+                        ? "❌ dưới ngưỡng"
+                        : line * 100 >= threshold.TargetLine && branch * 100 >= threshold.TargetBranch ? "✅ đạt mục tiêu" : "✅ đạt ngưỡng";
+                md.AppendLine(string.Create(Invariant, $"| {Cell(name)} | {Percent(line)} / {threshold.Line:0.0}% / {threshold.TargetLine:0.0}% | {Percent(branch)} / {threshold.Branch:0.0}% / {threshold.TargetBranch:0.0}% | {verdict} |"));
+            }
+
+            md.AppendLine();
+            if (!apply)
+            {
+                md.AppendLine("Ngưỡng chỉ áp dụng khi các tier unit, property, integration và e2e đều chạy trong lần này.");
+                md.AppendLine();
+            }
+        }
         if (coverage.Uncovered.Count > 0)
         {
             md.AppendLine("### 50 vùng chưa phủ lớn nhất");

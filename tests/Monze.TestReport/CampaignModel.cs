@@ -58,6 +58,12 @@ internal sealed record UncoveredRegion(string Assembly, string File, int StartLi
     public int Lines => EndLine - StartLine + 1;
 }
 
+/// <summary>
+/// One assembly of tests/coverage-thresholds.json, in percent: the floor the
+/// full campaign may not drop below and the target it is raised towards.
+/// </summary>
+internal sealed record CoverageThreshold(double Line, double Branch, double TargetLine, double TargetBranch);
+
 internal sealed record CoverageSummary(
     IReadOnlyList<CoverageAssembly> Assemblies,
     IReadOnlyList<UncoveredRegion> Uncovered,
@@ -103,4 +109,5 @@ internal sealed record CampaignModel(
     IReadOnlyList<ArtifactDocument> Artifacts,
     IReadOnlyList<BrowserCase> BrowserCases,
     IReadOnlyList<RedactionFinding> RawRedactionFindings,
-    IReadOnlyList<ExpectedGap> ExpectedGaps);
+    IReadOnlyList<ExpectedGap> ExpectedGaps,
+    IReadOnlyDictionary<string, CoverageThreshold> CoverageThresholds);

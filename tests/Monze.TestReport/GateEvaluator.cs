@@ -5,7 +5,8 @@ internal sealed record GateResult(string Gate, string Title, string Verdict, str
 /// <summary>
 /// Maps tier outcomes to the correctness gates of docs/monze-correctness-test-plan.md.
 /// A gate is READY only when every tier it needs ran and passed; a missing tier
-/// keeps the default verdict "evidence missing".
+/// keeps the default verdict "evidence missing". G1 also fails when an
+/// assembly's coverage drops below its floor in tests/coverage-thresholds.json.
 /// </summary>
 internal static class GateEvaluator
 {
@@ -21,6 +22,9 @@ internal static class GateEvaluator
         ("G3", "Fault injection và chaos", ["chaos", "capacity"]),
         ("G4", "Quy mô, soak 2 giờ và bằng chứng live", ["micro", "component", "load", "soak", "live"])
     ];
+
+    // Coverage is collected by these tiers; floors only apply when all of them ran.
+    private static readonly string[] CoverageTiers = ["unit", "property", "integration", "e2e"];
 
     public static IReadOnlyList<GateResult> Evaluate(CampaignModel model, bool redactionViolated)
     {
@@ -40,6 +44,12 @@ internal static class GateEvaluator
             }
 
             var evidence = string.Join(", ", states.Select(static state => $"{state.name}={state.Item2}"));
+            if (gate == "G1" && CoverageFloorsApply(model) && CoverageBelowFloor(model) is { Count: > 0 } below)
+            {
+                verdict = Failed;
+                evidence += "; coverage dưới ngưỡng: " + string.Join(", ", below);
+            }
+
             results.Add(new GateResult(gate, title, verdict, evidence));
         }
 
@@ -64,6 +74,41 @@ internal static class GateEvaluator
         return gates.All(static gate => gate.Verdict == Ready)
             ? "READY"
             : "NOT READY — evidence missing";
+    }
+
+    /// <summary>Whether the floors can be judged: there are floors and coverage, and every coverage tier ran.</summary>
+    public static bool CoverageFloorsApply(CampaignModel model)
+    {
+        if (model.Coverage is null || model.CoverageThresholds.Count == 0)
+        {
+            return false;
+        }
+
+        var tiers = model.Manifest.Tiers.ToDictionary(static tier => tier.Name, StringComparer.Ordinal);
+        return CoverageTiers.All(name => tiers.TryGetValue(name, out var tier) && tier.Status != TierStatus.NotRun);
+    }
+
+    /// <summary>"Assembly line|branch x% < floor%" for each measure below its floor (an assembly without coverage is below).</summary>
+    public static IReadOnlyList<string> CoverageBelowFloor(CampaignModel model)
+    {
+        var below = new List<string>();
+        foreach (var (assembly, threshold) in model.CoverageThresholds.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+        {
+            var measured = model.Coverage?.Assemblies.FirstOrDefault(a => a.Assembly == assembly);
+            var line = measured is null ? 0 : measured.LineRate * 100;
+            var branch = measured is null ? 0 : measured.BranchRate * 100;
+            if (line < threshold.Line)
+            {
+                below.Add(FormattableString.Invariant($"{assembly} line {line:0.0}% < {threshold.Line:0.0}%"));
+            }
+
+            if (branch < threshold.Branch)
+            {
+                below.Add(FormattableString.Invariant($"{assembly} branch {branch:0.0}% < {threshold.Branch:0.0}%"));
+            }
+        }
+
+        return below;
     }
 
     private static bool SoakIsFullLength(CampaignModel model)

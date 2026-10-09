@@ -312,6 +312,29 @@ internal static partial class ArtifactReaders
     }
 
     /// <summary>The defect registry (tests/traceability/expected-gaps.json); empty without a repository root.</summary>
+    public static IReadOnlyDictionary<string, CoverageThreshold> ReadCoverageThresholds(string? repositoryRoot)
+    {
+        var path = repositoryRoot is null ? null : Path.Combine(repositoryRoot, "tests", "coverage-thresholds.json");
+        var thresholds = new Dictionary<string, CoverageThreshold>(StringComparer.Ordinal);
+        if (path is null || !File.Exists(path))
+        {
+            return thresholds;
+        }
+
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        foreach (var assembly in document.RootElement.GetProperty("assemblies").EnumerateObject())
+        {
+            var value = assembly.Value;
+            thresholds[assembly.Name] = new CoverageThreshold(
+                value.GetProperty("line").GetDouble(),
+                value.GetProperty("branch").GetDouble(),
+                value.GetProperty("targetLine").GetDouble(),
+                value.GetProperty("targetBranch").GetDouble());
+        }
+
+        return thresholds;
+    }
+
     public static IReadOnlyList<ExpectedGap> ReadExpectedGaps(string? repositoryRoot)
     {
         var path = repositoryRoot is null ? null : Path.Combine(repositoryRoot, "tests", "traceability", "expected-gaps.json");

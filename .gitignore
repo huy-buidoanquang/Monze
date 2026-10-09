@@ -187,6 +187,8 @@ _TeamCity*
 
 # Coverlet is a free, cross platform Code Coverage Tool
 coverage*.json
+# Coverage floors of the test campaign (config, not output).
+!tests/coverage-thresholds.json
 coverage*.xml
 coverage*.info
 

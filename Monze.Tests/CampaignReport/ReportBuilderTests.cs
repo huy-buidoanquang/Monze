@@ -100,6 +100,37 @@ public sealed class ReportBuilderTests : IDisposable
     }
 
     [Fact]
+    [Req("REQ-RPT-004")]
+    public void Coverage_below_its_floor_fails_G1_once_every_coverage_tier_ran()
+    {
+        WriteThresholds(("Monze.Domain", 75.0, 0.0));
+        WriteCobertura("unit", ("Monze.Domain", "src/Monze.Domain/A.cs", 1, 1), ("Monze.Domain", "src/Monze.Domain/A.cs", 2, 0));
+        WriteManifest(("unit", "PASS"), ("property", "PASS"), ("integration", "PASS"), ("e2e", "PASS"));
+
+        var report = File.ReadAllText(ReportBuilder.Build(_root, _root, null, null).ReportPath);
+
+        Assert.Contains("| Monze.Domain | 50.0% / 75.0% / 100.0% |", report, StringComparison.Ordinal);
+        Assert.Contains("❌ dưới ngưỡng", report, StringComparison.Ordinal);
+        var g1 = Assert.Single(report.Split('\n'), static line => line.StartsWith("| G1 |", StringComparison.Ordinal));
+        Assert.Contains("FAILED", g1, StringComparison.Ordinal);
+        Assert.Contains("coverage dưới ngưỡng: Monze.Domain line 50.0% < 75.0%", g1, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Req("REQ-RPT-004")]
+    public void Coverage_floors_are_not_judged_on_a_partial_run()
+    {
+        WriteThresholds(("Monze.Domain", 75.0, 0.0));
+        WriteCobertura("unit", ("Monze.Domain", "src/Monze.Domain/A.cs", 1, 1), ("Monze.Domain", "src/Monze.Domain/A.cs", 2, 0));
+        WriteManifest(("unit", "PASS"));
+
+        var report = File.ReadAllText(ReportBuilder.Build(_root, _root, null, null).ReportPath);
+
+        Assert.Contains("— không áp dụng", report, StringComparison.Ordinal);
+        Assert.DoesNotContain("coverage dưới ngưỡng", report, StringComparison.Ordinal);
+    }
+
+    [Fact]
     [Req("REQ-RPT-005")]
     public void Scan_names_the_rule_without_echoing_the_value()
     {
@@ -216,6 +247,19 @@ public sealed class ReportBuilderTests : IDisposable
             invariants = new[] { new { id = "no-duplicate-send", pass = true } },
             defectIds = new[] { "DEF-07" }
         }));
+    }
+
+    private void WriteThresholds(params (string Assembly, double Line, double Branch)[] floors)
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "tests"));
+        File.WriteAllText(
+            Path.Combine(_root, "tests", "coverage-thresholds.json"),
+            JsonSerializer.Serialize(new
+            {
+                assemblies = floors.ToDictionary(
+                    static floor => floor.Assembly,
+                    static floor => new { line = floor.Line, branch = floor.Branch, targetLine = 100.0, targetBranch = 100.0 })
+            }));
     }
 
     private void WriteCobertura(string name, params (string Assembly, string File, int Line, int Hits)[] lines)

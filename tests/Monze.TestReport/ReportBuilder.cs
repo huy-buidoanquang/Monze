@@ -36,7 +36,8 @@ internal static class ReportBuilder
             ArtifactReaders.ReadArtifacts(raw, ArtifactKinds),
             ArtifactReaders.ReadBrowserLedger(browserLedger),
             rawFindings,
-            ArtifactReaders.ReadExpectedGaps(repositoryRoot));
+            ArtifactReaders.ReadExpectedGaps(repositoryRoot),
+            ArtifactReaders.ReadCoverageThresholds(repositoryRoot));
 
         var gates = GateEvaluator.Evaluate(model, redactionViolated: false);
         var overall = GateEvaluator.Overall(gates, model);
@@ -99,6 +100,7 @@ internal static class ReportBuilder
                 line = Math.Round(a.LineRate * 100, 2),
                 branch = Math.Round(a.BranchRate * 100, 2)
             }),
+            coverageBelowFloor = GateEvaluator.CoverageFloorsApply(model) ? GateEvaluator.CoverageBelowFloor(model) : null,
             knownDefects = model.KnownDefects.Select(static d => new { d.DefectId, d.Outcome }),
             scenarios = model.Artifacts.Select(static artifact => new
             {
