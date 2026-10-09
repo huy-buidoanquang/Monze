@@ -137,3 +137,22 @@ mezon-api `bcc6e172` and the mezon-proto-server working tree of 2026-10-09.
 - **Upstream fix:** pipeline several sends per channel while keeping their
   order (sequence numbers), or document the 1/RTT ceiling per channel.
 - **Monze:** nothing to change. The outbox is already a pipeline.
+
+## 7. Per-channel message cache grows with the number of channels (CAND-31, Mezon.Net)
+
+- **Source:** `src/Mezon.Net.Sdk/Entities/Channel.cs` creates
+  `Messages = new EntityCache<Message>(Options.CacheCapacity)` for every
+  channel. `CacheCapacity` (default 512) also sizes the clan, channel, role
+  and user caches, and nothing bounds the total.
+- **Impact:** retained memory grows towards active channels × 512 messages
+  (about 0.4 KB each with the protobuf). The 120-minute soak (1,000 clans,
+  V3L) gained 84.5 MiB/h of heap in the baseline.
+- **Evidence:** heap histograms of the soak on the fixed build, minutes 30
+  and 40: +20.6 MiB in total, of which `ChannelMessage`, `Message`, the
+  `EntityCache<Message>` nodes and their strings are +30,189 entries
+  (about 12 MiB); Monze's own structures are flat.
+- **Upstream fix:** a separate message cache capacity (Monze keeps its own
+  history in `SqliteMessageStore` and needs few or none), or a global bound
+  across channels.
+- **Monze:** nothing to change before that. Lowering `CacheCapacity` would
+  also shrink the clan and channel caches below 1,000 clans.
