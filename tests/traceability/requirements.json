@@ -7,7 +7,7 @@
       "area": "commands",
       "title": "Định tuyến lệnh: prefix, root, lệnh lạ và clan không xác định",
       "legacyTestIds": [],
-      "covers": ["cmd:monze", "cmd:unknown", "msg:UnknownCommand", "msg:UnknownClan", "msg:TitleMonze", "msg:TemporaryFailure", "cfg:Monze:Commands:*", "sdk:client.UseCommands", "sdk:context.ReplyAsync", "log@Hosting/MonzeBot.Commands.cs", "log@Hosting/MonzeBot.Routing.cs"],
+      "covers": ["cmd:monze", "cmd:unknown", "msg:UnknownCommand", "msg:UnknownClan", "msg:TitleMonze", "msg:TemporaryFailure", "cfg:Monze:Commands:*", "sdk:context.ReplyAsync", "log@Hosting/MonzeBot.Commands.cs", "log@Hosting/MonzeBot.Routing.cs"],
       "tests": ["CommandArgumentsTests.*", "MonzeAppCommandTests.*", "BrowserRegressionTests.*"]
     },
     {
@@ -287,7 +287,7 @@
       "area": "hosting",
       "title": "Vòng đời bot: chờ readiness, đăng nhập, chạy worker, dừng và drain",
       "legacyTestIds": [],
-      "covers": ["log@Hosting/MonzeBot.cs", "log@Hosting/MonzeBot.Lifecycle.cs", "log@Hosting/StartupSchemaValidator.cs"],
+      "covers": ["log@Hosting/MonzeBot.cs", "log@Hosting/MonzeBot.Lifecycle.cs", "log@Hosting/StartupSchemaValidator.cs", "log@Hosting/MonzeBot.Handlers.cs"],
       "tests": []
     },
     {

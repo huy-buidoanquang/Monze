@@ -1,5 +1,7 @@
 using System.Net;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Monze.Application;
 using Monze.Hosting;
 using Monze.Infrastructure.Persistence;
 using Monze.Simulator;
@@ -133,5 +135,78 @@ public sealed class HostLifecycleWorkflowTests
 
         await start.WaitAsync(TimeSpan.FromSeconds(30));
         Assert.True(readiness.Ready.IsCompletedSuccessfully);
+    }
+
+    /// <summary>
+    /// Regression for WF-08: commands run on SDK event tasks that the stop
+    /// used to leave behind, so one answered while the host stopped could
+    /// record its completion only after the database was gone; the row stayed
+    /// 'processing' and a redelivery after the restart answered it again
+    /// (PR-06). The stop now waits for it, and the completion is recorded.
+    /// </summary>
+    [DbFact]
+    [Req("REQ-HOST-011")]
+    public async Task A_command_answered_while_stopping_is_recorded_as_completed()
+    {
+        var inbox = new GatedCommandInbox();
+        await using var host = await E2EActions.StartAsync(
+            "wf_stop_command",
+            services: services => services.AddSingleton<ICommandInboxRepository>(provider =>
+            {
+                inbox.Inner = new PostgresCommandInboxRepository(provider.GetRequiredService<NpgsqlDataSource>());
+                return inbox;
+            }),
+            timings: static timings => timings with { UncertainMarkTimeout = TimeSpan.FromSeconds(5) });
+
+        // Not CommandAsync: it waits for the completion the gate holds.
+        await host.Inbound.SayAsync(ClanId, GeneralId, MemberId, "*monze help");
+        await inbox.CompletionReached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var stopping = host.StopHostAsync();
+
+        // The stop waits (up to UncertainMarkTimeout) for the command still recording its outcome.
+        Assert.NotSame(stopping, await Task.WhenAny(stopping, Task.Delay(TimeSpan.FromSeconds(2))));
+        inbox.Release.TrySetResult();
+        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.True(inbox.CompletionDone.Task.IsCompleted);
+        Assert.Equal(1L, await host.ScalarAsync<long>("SELECT count(*) FROM command_inbox WHERE status = 'completed';"));
+    }
+
+    /// <summary>Holds the first completion until the test releases it, after the host began stopping.</summary>
+    private sealed class GatedCommandInbox : ICommandInboxRepository
+    {
+        public ICommandInboxRepository Inner { get; set; } = null!;
+
+        public TaskCompletionSource CompletionReached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource CompletionDone { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<CommandInboxLease?> TryClaimAsync(long clanId, long channelId, long messageId, CancellationToken cancellationToken)
+            => Inner.TryClaimAsync(clanId, channelId, messageId, cancellationToken);
+
+        public async Task<bool> CompleteAsync(CommandInboxLease lease, CancellationToken cancellationToken)
+        {
+            CompletionReached.TrySetResult();
+            await Release.Task;
+            try
+            {
+                return await Inner.CompleteAsync(lease, cancellationToken);
+            }
+            finally
+            {
+                CompletionDone.TrySetResult();
+            }
+        }
+
+        public Task<bool> MarkUncertainAsync(CommandInboxLease lease, CancellationToken cancellationToken)
+            => Inner.MarkUncertainAsync(lease, cancellationToken);
+
+        public Task ReleaseAsync(CommandInboxLease lease, CancellationToken cancellationToken)
+            => Inner.ReleaseAsync(lease, cancellationToken);
+
+        public Task PurgeAsync(DateTimeOffset before, CancellationToken cancellationToken)
+            => Inner.PurgeAsync(before, cancellationToken);
     }
 }

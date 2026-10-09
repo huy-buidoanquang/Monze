@@ -77,6 +77,9 @@ public sealed partial class SimWireCatalogTests
         ["UpdateEphemeralAsync"] = [SimOperations.EphemeralMessageSend],
         ["DeleteEphemeralAsync"] = [SimOperations.EphemeralMessageSend],
         ["UpdateMessageAsync"] = [SimOperations.UpdateChannelMessage],
+        // Monze routes commands itself (Hosting/MonzeBot.Routing.cs); the context
+        // reads the channel (GetChannelAsync) and builds the user from the cache.
+        ["HandleMessageAsync"] = [SimOperations.ListChannelDetail, SimOperations.ListClanDescs],
         ["HandleButtonAsync"] = [],
         ["HandleSelectAsync"] = []
     };

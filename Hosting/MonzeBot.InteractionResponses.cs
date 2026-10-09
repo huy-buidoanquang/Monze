@@ -18,7 +18,8 @@ public sealed partial class MonzeBot
     private async Task DispatchButtonInteractionAsync(
         SdkMezonClient client,
         InteractionRouter router,
-        MessageButtonClickedEventData evt)
+        MessageButtonClickedEventData evt,
+        CancellationToken cancellationToken)
     {
         var response = (MessageButtonClickedResponse)evt;
         _logger.LogDebug(
@@ -31,7 +32,7 @@ public sealed partial class MonzeBot
         try
         {
             await HydrateInteractionChannelAsync(client, response.ChannelId).ConfigureAwait(false);
-            var result = await router.HandleButtonAsync(client, evt).ConfigureAwait(false);
+            var result = await router.HandleButtonAsync(client, evt, cancellationToken).ConfigureAwait(false);
             _logger.LogDebug(
                 "Button interaction dispatch completed. Channel={ChannelId}, Message={MessageId}, CustomId={CustomId}, Result={Result}.",
                 response.ChannelId,
@@ -39,7 +40,7 @@ public sealed partial class MonzeBot
                 response.ButtonId,
                 result);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning(
                 ex,
@@ -53,13 +54,14 @@ public sealed partial class MonzeBot
     private async Task DispatchSelectInteractionAsync(
         SdkMezonClient client,
         InteractionRouter router,
-        DropdownBoxSelectedEventData evt)
+        DropdownBoxSelectedEventData evt,
+        CancellationToken cancellationToken)
     {
         var response = (DropdownBoxSelectedResponse)evt;
         try
         {
             await HydrateInteractionChannelAsync(client, response.ChannelId).ConfigureAwait(false);
-            var result = await router.HandleSelectAsync(client, evt).ConfigureAwait(false);
+            var result = await router.HandleSelectAsync(client, evt, cancellationToken).ConfigureAwait(false);
             _logger.LogDebug(
                 "Select interaction dispatch completed. Channel={ChannelId}, Message={MessageId}, SelectId={SelectId}, Result={Result}.",
                 response.ChannelId,
@@ -67,7 +69,7 @@ public sealed partial class MonzeBot
                 response.SelectboxId,
                 result);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning(
                 ex,

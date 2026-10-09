@@ -100,6 +100,32 @@ public sealed class AiWorkflowTests
         await E2EOracles.AssertInvariantsAsync(host);
     }
 
+    /// <summary>
+    /// Regression for WF-06: an AI request still running when the host stops
+    /// is cancelled once the stop's grace period (UncertainMarkTimeout) ends,
+    /// and its loading card is closed with the temporary failure card while
+    /// the client is still connected. The SDK gives commands no token, so it
+    /// used to run on past the stop and the card was never updated.
+    /// </summary>
+    [DbFact]
+    [Req("REQ-AI-001")]
+    public async Task A_request_running_when_the_host_stops_closes_its_loading_card()
+    {
+        await using var http = await E2EActions.HttpAsync();
+        await using var host = await E2EActions.StartAsync("wf_ai_stop", http: http, agent: false);
+        http.Faults.Hang(SimHttpRoute.AiCompletion);
+        // Not CommandAsync: it waits for the command to finish, which the hung provider prevents.
+        var command = await host.Inbound.SayAsync(ClanId, GeneralId, MemberId, "*ai simplify nội dung đang xử lý");
+        await E2EActions.WaitUntilAsync(
+            host,
+            () => Task.FromResult(http.Requests.Any(static request => request.Route == SimHttpRoute.AiCompletion)),
+            "the AI request");
+
+        await host.StopHostAsync().WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Contains(MonzeMessages.TemporaryFailure, E2EContent.Visible(LastEdit(host, command)));
+    }
+
     /// <summary>The final state of the command's loading card.</summary>
     private static SimAction LastEdit(MonzeE2EHost host, SimPush command)
     {

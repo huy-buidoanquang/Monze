@@ -149,6 +149,7 @@ public sealed partial class MonzeBot
             if (aiLoadingMessageId > 0)
             {
                 // Stopped mid-request: replace the loading card instead of leaving it behind (WF-06).
+                // The command is then recorded as uncertain (ExecuteCommandOnceCoreAsync).
                 try
                 {
                     await UpdateCommandAsync(
@@ -162,6 +163,8 @@ public sealed partial class MonzeBot
                     _logger.LogWarning(ex, "The AI loading card could not be closed while stopping. LoadingMessage={LoadingMessageId}.", aiLoadingMessageId);
                 }
             }
+
+            throw;
         }
         catch (Exception ex)
         {

@@ -317,6 +317,8 @@ public sealed partial class MonzeBot : BackgroundService
             {
                 _messageGapIngress.Writer.TryComplete();
             }
+
+            await DrainHandlersAsync();
         }
     }
 
@@ -398,6 +400,7 @@ public sealed partial class MonzeBot : BackgroundService
         }
 
         _clanJoinGate.Dispose();
+        _handlerStop.Dispose();
         base.Dispose();
     }
 }

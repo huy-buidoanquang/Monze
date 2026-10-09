@@ -104,7 +104,10 @@ public sealed partial class MonzeBot
 
         try
         {
-            if (!await _commandInbox.CompleteAsync(lease.Value, context.CancellationToken))
+            // Not the command's token: an answered command whose completion is dropped
+            // while stopping stays 'processing' and a redelivery answers it again (WF-08).
+            using var timeout = NewOutcomeTimeout();
+            if (!await _commandInbox.CompleteAsync(lease.Value, timeout.Token))
             {
                 _logger.LogError(
                     "Command inbox lease was lost before completion. Clan={ClanId}, Channel={ChannelId}, Message={MessageId}.",
@@ -132,8 +135,8 @@ public sealed partial class MonzeBot
 
     private async Task MarkCommandUncertainAsync(CommandInboxLease lease)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_runtimeToken);
-        timeout.CancelAfter(_timings.UncertainMarkTimeout);
+        // Not on the stopping token: stopping is when this matters (WF-08).
+        using var timeout = NewOutcomeTimeout();
         try
         {
             if (!await _commandInbox.MarkUncertainAsync(lease, timeout.Token))
@@ -143,7 +146,7 @@ public sealed partial class MonzeBot
                     lease.MessageId);
             }
         }
-        catch (Exception ex) when (!timeout.IsCancellationRequested || !_runtimeToken.IsCancellationRequested)
+        catch (Exception ex)
         {
             _logger.LogError(
                 ex,
