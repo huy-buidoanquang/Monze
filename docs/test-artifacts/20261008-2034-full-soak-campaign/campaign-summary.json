@@ -1,0 +1,665 @@
+{
+  "schema": "monze.campaign-summary.v1",
+  "campaignId": "20261008-2034-full-soak",
+  "profile": "full-soak",
+  "commit": "7611564",
+  "branch": "fix/browser-test-findings",
+  "dirty": false,
+  "startedUtc": "2026-10-08T20:34:22.2842635+00:00",
+  "finishedUtc": "2026-10-09T01:17:30.312317+00:00",
+  "verdict": "NOT READY \u2014 failures",
+  "gates": [
+    {
+      "Gate": "G0",
+      "Verdict": "READY"
+    },
+    {
+      "Gate": "G1",
+      "Verdict": "READY"
+    },
+    {
+      "Gate": "G2",
+      "Verdict": "READY"
+    },
+    {
+      "Gate": "G3",
+      "Verdict": "FAILED"
+    },
+    {
+      "Gate": "G4",
+      "Verdict": "FAILED"
+    }
+  ],
+  "tiers": [
+    {
+      "Name": "preflight",
+      "Status": "PASS",
+      "DurationSeconds": 2.5
+    },
+    {
+      "Name": "build",
+      "Status": "PASS",
+      "DurationSeconds": 3.4
+    },
+    {
+      "Name": "inventory",
+      "Status": "PASS",
+      "DurationSeconds": 2.1
+    },
+    {
+      "Name": "unit",
+      "Status": "PASS",
+      "DurationSeconds": 7.6
+    },
+    {
+      "Name": "property",
+      "Status": "PASS",
+      "DurationSeconds": 13.6
+    },
+    {
+      "Name": "integration",
+      "Status": "PASS",
+      "DurationSeconds": 24.3
+    },
+    {
+      "Name": "e2e",
+      "Status": "PASS",
+      "DurationSeconds": 377.7
+    },
+    {
+      "Name": "micro",
+      "Status": "PASS",
+      "DurationSeconds": 214.1
+    },
+    {
+      "Name": "component",
+      "Status": "PASS",
+      "DurationSeconds": 230.5
+    },
+    {
+      "Name": "load",
+      "Status": "FAIL",
+      "DurationSeconds": 4225.1
+    },
+    {
+      "Name": "k6",
+      "Status": "PASS",
+      "DurationSeconds": 122.1
+    },
+    {
+      "Name": "capacity",
+      "Status": "PASS",
+      "DurationSeconds": 190
+    },
+    {
+      "Name": "chaos",
+      "Status": "FAIL",
+      "DurationSeconds": 4365.9
+    },
+    {
+      "Name": "soak",
+      "Status": "FAIL",
+      "DurationSeconds": 7203.6
+    },
+    {
+      "Name": "live",
+      "Status": "NOT_RUN",
+      "DurationSeconds": 0
+    }
+  ],
+  "tests": {
+    "total": 450,
+    "passed": 450,
+    "failed": 0,
+    "skipped": 0
+  },
+  "generatedChecks": 1438845,
+  "generators": 60,
+  "coverage": [
+    {
+      "Assembly": "Monze",
+      "line": 79.31,
+      "branch": 73.17
+    },
+    {
+      "Assembly": "Monze.Application",
+      "line": 93.54,
+      "branch": 90.31
+    },
+    {
+      "Assembly": "Monze.Domain",
+      "line": 95.85,
+      "branch": 75
+    },
+    {
+      "Assembly": "Monze.Infrastructure",
+      "line": 96.71,
+      "branch": 75.05
+    }
+  ],
+  "knownDefects": [
+    {
+      "DefectId": "CAND-01",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "CAND-02",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "CAND-03",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "CAND-05",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "CAND-07",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "CAND-08",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "CAND-09",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "CAND-10",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "CAND-11",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "CAND-12",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "CAND-13",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "CAND-14",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "CAND-15",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "CAND-18",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "CAND-19",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "CAND-21",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "DEF-01",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "DEF-04",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "DEF-05",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "DEF-06",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "DEF-08",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "DEF-10",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "DEF-12",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "WF-01",
+      "Outcome": "xfail"
+    },
+    {
+      "DefectId": "WF-02",
+      "Outcome": "xfail"
+    }
+  ],
+  "scenarios": [
+    {
+      "Kind": "component",
+      "id": "C-INBOX",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "component",
+      "id": "C-MIGRATE",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "component",
+      "id": "C-OUTBOX-CLAIM",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "component",
+      "id": "C-POOL",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "component",
+      "id": "C-REDIS",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "component",
+      "id": "C-SCHED",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "component",
+      "id": "C-SKIPLOCKED",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "component",
+      "id": "C-SQLITE",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "component",
+      "id": "C-SUMMARY-LEASE",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "load",
+      "id": "L-V1-S1",
+      "verdict": "FAIL"
+    },
+    {
+      "Kind": "load",
+      "id": "L-V1-S10",
+      "verdict": "FAIL"
+    },
+    {
+      "Kind": "load",
+      "id": "L-V1-S100",
+      "verdict": "FAIL"
+    },
+    {
+      "Kind": "load",
+      "id": "L-V1-S1000",
+      "verdict": "FAIL"
+    },
+    {
+      "Kind": "load",
+      "id": "L-V3-S1",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "load",
+      "id": "L-V3-S10",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "load",
+      "id": "L-V3-S100",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "load",
+      "id": "L-V3-S1000",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "load",
+      "id": "L-V3L-S1",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "load",
+      "id": "L-V3L-S10",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "load",
+      "id": "L-V3L-S100",
+      "verdict": "KNOWN_GAP_NOT_REPRODUCED"
+    },
+    {
+      "Kind": "load",
+      "id": "L-V3L-S1000",
+      "verdict": "KNOWN_GAP_NOT_REPRODUCED"
+    },
+    {
+      "Kind": "capacity",
+      "id": "BP-1",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "capacity",
+      "id": "BP-2",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "capacity",
+      "id": "BP-3",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "capacity",
+      "id": "BP-4",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "capacity",
+      "id": "BP-5-V1",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "capacity",
+      "id": "BP-5",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "capacity",
+      "id": "BP-6",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "capacity",
+      "id": "BP-7",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "capacity",
+      "id": "BP-8-DEF06",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "capacity",
+      "id": "BP-8",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "soak",
+      "id": "SOAK-120M",
+      "verdict": "FAIL"
+    },
+    {
+      "Kind": "k6",
+      "id": "K6-CROSSCHECK",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "AG-01",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "chaos",
+      "id": "AG-02",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "chaos",
+      "id": "AG-03",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "AG-04",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "AG-05",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "AG-06",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "AI-01",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "AI-02",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "AI-03",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "AI-04",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "AI-05",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "AI-06",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "CLK-01",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "CLK-02",
+      "verdict": "KNOWN_GAP_NOT_REPRODUCED"
+    },
+    {
+      "Kind": "chaos",
+      "id": "CLK-03",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "chaos",
+      "id": "CLK-04",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "EV-01",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "EV-03",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "EV-04",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "MZ-01",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "chaos",
+      "id": "MZ-02",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "chaos",
+      "id": "MZ-03",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "MZ-04",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "MZ-05",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "MZ-07",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "chaos",
+      "id": "MZ-08",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "chaos",
+      "id": "PG-01",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "PG-02",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "PG-03",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "PG-04a",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "PG-04b",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "chaos",
+      "id": "PG-05",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "PG-06",
+      "verdict": "KNOWN_GAP_NOT_REPRODUCED"
+    },
+    {
+      "Kind": "chaos",
+      "id": "PG-07",
+      "verdict": "FAIL"
+    },
+    {
+      "Kind": "chaos",
+      "id": "PG-08",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "PR-01",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "chaos",
+      "id": "PR-06",
+      "verdict": "FAIL"
+    },
+    {
+      "Kind": "chaos",
+      "id": "PR-07",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "RD-01",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "RD-02",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "chaos",
+      "id": "RD-03",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "RD-04",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "RD-05",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "RD-06",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "TR-01",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "chaos",
+      "id": "TR-02",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "TR-03",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "chaos",
+      "id": "TR-04",
+      "verdict": "KNOWN_GAP"
+    },
+    {
+      "Kind": "chaos",
+      "id": "TR-05",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "traceability",
+      "id": "trace-map",
+      "verdict": "PASS"
+    },
+    {
+      "Kind": "micro",
+      "id": "micro",
+      "verdict": "PASS"
+    }
+  ],
+  "benchmarks": 24
+}
