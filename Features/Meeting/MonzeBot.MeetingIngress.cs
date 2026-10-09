@@ -40,6 +40,7 @@ public sealed partial class MonzeBot
     }
     private async Task WriteMeetingAsync(MeetingIngressItem item)
     {
+        Interlocked.Increment(ref _agentPendingWriters);
         try
         {
             await _meetingIngress.Writer.WriteAsync(item);
@@ -48,7 +49,27 @@ public sealed partial class MonzeBot
         catch (ChannelClosedException)
         {
         }
+        finally
+        {
+            Interlocked.Decrement(ref _agentPendingWriters);
+        }
     }
+    /// <summary>
+    /// Saves the Agent SSE resume cursor once the queue is empty, so a restart
+    /// resumes after the last event processed here (DEF-08).
+    /// </summary>
+    private void SaveAgentCursor()
+    {
+        try
+        {
+            _agentEvents?.SaveCursor();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "The Agent SSE resume cursor could not be saved.");
+        }
+    }
+
     private async Task ConsumeAgentEventsAsync(
         MezonClient client,
         CancellationToken cancellationToken)
@@ -90,6 +111,11 @@ public sealed partial class MonzeBot
                     case MeetingIngressKind.RealtimeReset:
                         await _meeting.CloseStartedMeetingContextsAsync(cancellationToken);
                         break;
+                }
+
+                if (item.Kind == MeetingIngressKind.AgentEvent && Volatile.Read(ref _agentIngressDepth) == 0)
+                {
+                    SaveAgentCursor();
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

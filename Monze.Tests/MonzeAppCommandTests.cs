@@ -1,6 +1,7 @@
 using Monze.Application;
 using Monze.Application.Commands;
 using Monze.Domain;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
@@ -262,7 +263,7 @@ public sealed class MonzeAppCommandTests
             RoleAutomationEnabled = true,
             RoleRules =
             [
-                new AutoRoleRule(ClanId, 70, RoleRuleKind.OnJoin, null, 1),
+                new AutoRoleRule(ClanId, 70, RoleRuleKind.OnJoin, null, 1, joinedAt.AddDays(-1)),
                 new AutoRoleRule(ClanId, 80, RoleRuleKind.Tenure, "30", 1)
             ],
             Members =
@@ -285,13 +286,35 @@ public sealed class MonzeAppCommandTests
     }
 
     [Fact]
+    [Req("REQ-TIME-001")]
+    public async Task Tenure_rule_uses_the_injected_clock()
+    {
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 1, 31, 12, 0, 0, TimeSpan.Zero));
+        var dependencies = new MonzeAppTestDependencies
+        {
+            RoleAutomationEnabled = true,
+            RoleRules = [new AutoRoleRule(ClanId, 80, RoleRuleKind.Tenure, "30", 1)],
+            Members = [new MemberRoleSnapshot(3, false, time.GetUtcNow().AddDays(-29), new HashSet<long>())]
+        };
+        var app = dependencies.CreateApp(withRoleGateway: true, timeProvider: time);
+
+        await app.ApplyAutomaticRoleRulesAsync(CancellationToken.None);
+        Assert.Empty(dependencies.RoleAssignments);
+
+        time.Advance(TimeSpan.FromDays(1));
+        await app.ApplyAutomaticRoleRulesAsync(CancellationToken.None);
+
+        Assert.Contains(dependencies.RoleAssignments, item => item.UserId == 3 && item.RoleId == 80);
+    }
+
+    [Fact]
     public async Task Automatic_roles_do_not_record_a_failed_platform_assignment()
     {
         var dependencies = new MonzeAppTestDependencies
         {
             RoleAutomationEnabled = true,
             RoleAssignment = new RoleAssignmentResult(false, 0),
-            RoleRules = [new AutoRoleRule(ClanId, 70, RoleRuleKind.OnJoin, null, 1)],
+            RoleRules = [new AutoRoleRule(ClanId, 70, RoleRuleKind.OnJoin, null, 1, DateTimeOffset.UtcNow.AddDays(-1))],
             Members = [new MemberRoleSnapshot(3, false, DateTimeOffset.UtcNow, new HashSet<long>())]
         };
         var app = dependencies.CreateApp(withRoleGateway: true);
@@ -300,6 +323,71 @@ public sealed class MonzeAppCommandTests
 
         Assert.Single(dependencies.RoleAssignments);
         Assert.Empty(dependencies.RecordedRoleGrants);
+    }
+
+    /// <summary>
+    /// CAND-22 (decided: an on-join rule is for new members only): the
+    /// periodic scan grants the role to a member who joined after the rule
+    /// was set (a join the bot missed) but not to earlier members or to one
+    /// whose join time is unknown.
+    /// </summary>
+    [Fact]
+    [Req("REQ-ROLE-002")]
+    public async Task The_periodic_scan_applies_an_on_join_rule_only_to_members_who_joined_after_it()
+    {
+        var ruleSet = DateTimeOffset.UtcNow.AddDays(-7);
+        var dependencies = new MonzeAppTestDependencies
+        {
+            RoleAutomationEnabled = true,
+            RoleRules = [new AutoRoleRule(ClanId, 70, RoleRuleKind.OnJoin, null, 1, ruleSet)],
+            Members =
+            [
+                new MemberRoleSnapshot(3, false, ruleSet.AddDays(-30), new HashSet<long>()),
+                new MemberRoleSnapshot(4, false, null, new HashSet<long>()),
+                new MemberRoleSnapshot(5, false, ruleSet.AddDays(2), new HashSet<long>())
+            ]
+        };
+        var app = dependencies.CreateApp(withRoleGateway: true);
+
+        await app.ApplyAutomaticRoleRulesAsync(CancellationToken.None);
+
+        Assert.Equal(new[] { 5L }, dependencies.RoleAssignments.Select(static item => item.UserId));
+    }
+
+    /// <summary>Regression for CAND-24: a grant that keeps failing is retried on the next scan, then less and less often.</summary>
+    [Fact]
+    [Req("REQ-ROLE-002")]
+    public async Task Automatic_roles_back_off_a_grant_that_keeps_failing()
+    {
+        var dependencies = new MonzeAppTestDependencies
+        {
+            RoleAutomationEnabled = true,
+            RoleAssignment = new RoleAssignmentResult(false, 0),
+            RoleRules = [new AutoRoleRule(ClanId, 70, RoleRuleKind.OnJoin, null, 1, DateTimeOffset.UtcNow.AddDays(-1))],
+            Members = [new MemberRoleSnapshot(3, false, DateTimeOffset.UtcNow, new HashSet<long>())]
+        };
+        var app = dependencies.CreateApp(withRoleGateway: true);
+        var attemptsAfterScan = new List<int>();
+
+        for (var scan = 0; scan < 9; scan++)
+        {
+            await app.ApplyAutomaticRoleRulesAsync(CancellationToken.None);
+            attemptsAfterScan.Add(dependencies.RoleAssignments.Count);
+        }
+
+        // Attempts on scans 1, 2, 4 and 8: one scan skipped after the second failure, three after the third.
+        Assert.Equal(new[] { 1, 2, 2, 3, 3, 3, 3, 4, 4 }, attemptsAfterScan);
+        Assert.Empty(dependencies.RecordedRoleGrants);
+
+        dependencies.RoleAssignment = new RoleAssignmentResult(true, 70);
+        for (var scan = 0; scan < 8 && dependencies.RecordedRoleGrants.Count == 0; scan++)
+        {
+            await app.ApplyAutomaticRoleRulesAsync(CancellationToken.None);
+        }
+
+        Assert.Single(dependencies.RecordedRoleGrants);
+        await app.ApplyAutomaticRoleRulesAsync(CancellationToken.None);
+        Assert.Equal(2, dependencies.RecordedRoleGrants.Count);
     }
 
     [Fact]
@@ -341,6 +429,41 @@ public sealed class MonzeAppCommandTests
         Assert.Null(conflicted.MeetingInvitation);
     }
 
+    /// <summary>
+    /// CAND-27 (decided: tell the creator): a schedule less than 30 minutes
+    /// from another one the creator can see in the channel is still saved,
+    /// with a warning that names the nearby schedule.
+    /// </summary>
+    [Fact]
+    [Req("REQ-MTG-002")]
+    public async Task A_schedule_near_another_is_saved_with_a_warning()
+    {
+        var day = DateTimeOffset.UtcNow.AddDays(2);
+        var at = new DateTimeOffset(day.Year, day.Month, day.Day, 18, 30, 0, TimeSpan.FromHours(7));
+        var dependencies = new MonzeAppTestDependencies
+        {
+            MeetingSchedules =
+            [
+                new MeetingScheduleSummary(11, "Standup", MeetingScheduleKind.Once, at.AddMinutes(15), "Asia/Ho_Chi_Minh", UserId),
+                new MeetingScheduleSummary(12, "Retro", MeetingScheduleKind.Once, at.AddHours(2), "Asia/Ho_Chi_Minh", UserId)
+            ]
+        };
+        var app = dependencies.CreateApp();
+
+        var scheduled = await app.HandleMeetingAsync(
+            ClanId,
+            ChannelId,
+            UserId,
+            ["Daily", at.ToString("dd/MM/yyyy", System.Globalization.CultureInfo.InvariantCulture), "18:30", "once"],
+            _ => Task.FromResult<MeetingVoiceCandidate?>(null),
+            CancellationToken.None);
+
+        Assert.Equal(MonzeTone.Warn, scheduled.Tone);
+        Assert.Equal(1, dependencies.ScheduleCreateCalls);
+        Assert.Contains("\"Standup\" (#11", scheduled.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Retro", scheduled.Text, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Meeting_schedule_and_cancel_use_the_current_text_channel()
     {
@@ -366,6 +489,26 @@ public sealed class MonzeAppCommandTests
             _ => Task.FromResult<MeetingVoiceCandidate?>(null),
             CancellationToken.None);
         Assert.Equal(MonzeMessages.MeetingScheduleCancelled, cancelled.Text);
+    }
+
+    [Fact]
+    public async Task Saved_schedule_reports_the_next_run_in_the_schedule_time_zone()
+    {
+        var dependencies = new MonzeAppTestDependencies();
+        var app = dependencies.CreateApp();
+        var future = DateTimeOffset.UtcNow.AddDays(2);
+
+        var scheduled = await app.HandleMeetingAsync(
+            ClanId,
+            ChannelId,
+            UserId,
+            ["Review", future.ToString("dd/MM/yyyy"), "18:30", "once"],
+            _ => Task.FromResult<MeetingVoiceCandidate?>(null),
+            CancellationToken.None);
+
+        Assert.Equal(MonzeTone.Ok, scheduled.Tone);
+        Assert.Contains("18:30 (Asia/Ho_Chi_Minh)", scheduled.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("UTC", scheduled.Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -435,6 +578,30 @@ public sealed class MonzeAppCommandTests
         Assert.Equal(MonzeMessages.AiBudgetExceeded, denied.Text);
         Assert.Equal(1, dependencies.AiBudgetCalls);
         Assert.Equal(0, dependencies.AiProviderCalls);
+    }
+
+    /// <summary>Regression for CAND-05: a request the provider does not answer gives its tokens back.</summary>
+    [Fact]
+    [Req("REQ-AI-001")]
+    [Covers("port:IAiUsageRepository.RefundAiAsync")]
+    public async Task Ai_refunds_the_budget_when_the_provider_gives_no_answer()
+    {
+        var dependencies = new MonzeAppTestDependencies { AiResponse = null };
+        var app = dependencies.CreateApp(withAi: true);
+
+        var failed = await app.HandleMonzeAsync(ClanId, ChannelId, UserId, ["ai", "translate", "hello world"], CancellationToken.None);
+
+        Assert.Equal(MonzeMessages.AiProviderEmpty, Assert.Single(failed.Fields!).Value);
+        Assert.Equal((ClanId, UserId, 3), Assert.Single(dependencies.AiRefunds));
+
+        dependencies.AiHandler = static (_, _, _) => throw new HttpRequestException("down");
+        await Assert.ThrowsAsync<HttpRequestException>(() => app.HandleMonzeAsync(ClanId, ChannelId, UserId, ["ai", "translate", "hello world"], CancellationToken.None));
+        Assert.Equal(2, dependencies.AiRefunds.Count);
+
+        dependencies.AiHandler = null;
+        dependencies.AiResponse = "xin chào";
+        await app.HandleMonzeAsync(ClanId, ChannelId, UserId, ["ai", "translate", "hello world"], CancellationToken.None);
+        Assert.Equal(2, dependencies.AiRefunds.Count);
     }
 
     [Fact]

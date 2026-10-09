@@ -28,11 +28,6 @@ public sealed class PostgresClanRegistryRepository : IClanRegistryRepository
 
     public async Task ApplyClanScanAsync(ClanScanItem item, ClanScanDisposition disposition, CancellationToken cancellationToken)
     {
-        if (disposition == ClanScanDisposition.IncompleteList)
-        {
-            return;
-        }
-
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         if (disposition == ClanScanDisposition.Inserted)
         {

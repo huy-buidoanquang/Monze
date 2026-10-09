@@ -98,19 +98,8 @@ public static class MeetingScheduleCalculator
             return false;
         }
 
-        var localNow = TimeZoneInfo.ConvertTime(now, zone);
-        var date = DateOnly.FromDateTime(localNow.DateTime);
-        for (var i = 0; i < 2; i++)
-        {
-            if (LocalSchedule.TryToUtc(date, time, zone.Id, out next, out error) && next > now)
-            {
-                return true;
-            }
-
-            date = date.AddDays(1);
-        }
-
-        return false;
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, zone).DateTime);
+        return TryEarliest(today.AddDays(-1), 10, null, time, zone, now, out next, out error);
     }
 
     private static bool TryWeekly(
@@ -140,22 +129,56 @@ public static class MeetingScheduleCalculator
             }
         }
 
-        var localNow = TimeZoneInfo.ConvertTime(now, zone);
-        var date = DateOnly.FromDateTime(localNow.DateTime);
-        var days = ((int)targetDay - (int)localNow.DayOfWeek + 7) % 7;
-        date = date.AddDays(days);
-        if (!LocalSchedule.TryToUtc(date, time, zone.Id, out next, out error))
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, zone).DateTime);
+        return TryEarliest(today, 15, targetDay, time, zone, now, out next, out error);
+    }
+
+    /// <summary>
+    /// The earliest instant after <paramref name="now"/> at <paramref name="time"/>
+    /// on the local dates [from, from + days) (only <paramref name="day"/>s when
+    /// given). A date whose local time does not exist (a DST gap, a skipped
+    /// calendar day) is passed over instead of ending the search (CAND-09).
+    /// </summary>
+    private static bool TryEarliest(
+        DateOnly from,
+        int days,
+        DayOfWeek? day,
+        TimeOnly time,
+        TimeZoneInfo zone,
+        DateTimeOffset now,
+        out DateTimeOffset next,
+        out string? error)
+    {
+        next = default;
+        error = null;
+        var found = false;
+        for (var i = 0; i < days; i++)
         {
-            return false;
+            var date = from.AddDays(i);
+            if (day is { } wanted && date.DayOfWeek != wanted)
+            {
+                continue;
+            }
+
+            if (!LocalSchedule.TryToUtc(date, time, zone.Id, out var candidate, out var candidateError))
+            {
+                error ??= candidateError;
+                continue;
+            }
+
+            if (candidate > now && (!found || candidate < next))
+            {
+                next = candidate;
+                found = true;
+            }
         }
 
-        if (next <= now)
+        if (found)
         {
-            date = date.AddDays(7);
-            return LocalSchedule.TryToUtc(date, time, zone.Id, out next, out error);
+            error = null;
         }
 
-        return true;
+        return found;
     }
 
     private static bool TryDay(string text, out DayOfWeek day)
@@ -182,7 +205,7 @@ public static class MeetingScheduleCalculator
 
     private static bool TryParseLocalDateTime(string text, out DateTime local)
     {
-        var formats = new[] { "dd/MM/yyyy HH:mm", "yyyy-MM-dd HH:mm" };
+        var formats = new[] { "dd/MM/yyyy HH:mm", "dd/MM/yyyy H:mm", "yyyy-MM-dd HH:mm", "yyyy-MM-dd H:mm" };
         return DateTime.TryParseExact(
             text,
             formats,

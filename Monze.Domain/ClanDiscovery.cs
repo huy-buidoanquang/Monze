@@ -15,8 +15,7 @@ public static class ClanDiscovery
 
     public static IReadOnlyList<(ClanScanItem Item, ClanScanDisposition Disposition)> Merge(
         IReadOnlyList<KnownClan> known,
-        IReadOnlyList<ClanScanItem> listed,
-        bool listLooksCapped)
+        IReadOnlyList<ClanScanItem> listed)
     {
         var knownById = new Dictionary<long, KnownClan>(known.Count);
         for (var i = 0; i < known.Count; i++)
@@ -24,17 +23,14 @@ public static class ClanDiscovery
             knownById[known[i].ClanId] = known[i];
         }
 
+        // Every listed clan has the bot as a member, so it is registered even
+        // when the list looks capped (DEF-06: mezon-api lists at most 100 clans);
+        // a capped list only stops IsKnownMissing from retiring unlisted ones.
         var results = new List<(ClanScanItem, ClanScanDisposition)>(listed.Count);
         foreach (var item in listed)
         {
             if (!knownById.TryGetValue(item.ClanId, out var existing))
             {
-                if (listLooksCapped)
-                {
-                    results.Add((item, ClanScanDisposition.IncompleteList));
-                    continue;
-                }
-
                 results.Add((item, ClanScanDisposition.Inserted));
                 continue;
             }

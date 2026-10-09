@@ -28,7 +28,7 @@ public sealed partial class MonzeBot
         _logger.LogInformation(
             "Welcome join event received and queued. IsBot={IsBot}.",
             item.IsBot);
-        if (_welcomeIngress.Writer.TryWrite(item))
+        if (_welcomeIngress.TryWrite(item.ClanId, item))
         {
             Interlocked.Increment(ref _welcomeIngressDepth);
             return Task.CompletedTask;
@@ -39,24 +39,55 @@ public sealed partial class MonzeBot
     }
     private async Task WriteWelcomeAsync(WelcomeIngressItem item)
     {
+        Interlocked.Increment(ref _welcomePendingWriters);
         try
         {
-            await _welcomeIngress.Writer.WriteAsync(item);
+            await _welcomeIngress.WriteAsync(item.ClanId, item);
             Interlocked.Increment(ref _welcomeIngressDepth);
         }
         catch (ChannelClosedException)
         {
         }
+        finally
+        {
+            Interlocked.Decrement(ref _welcomePendingWriters);
+        }
     }
-    private async Task ConsumeWelcomeAsync(
+    private const int WelcomePartitions = 8;
+
+    /// <summary>One consumer per welcome lane; joins of one clan stay in order.</summary>
+    private Task ConsumeWelcomeAsync(
         MezonClient client,
         CancellationToken cancellationToken)
     {
-        await foreach (var item in _welcomeIngress.Reader.ReadAllAsync(cancellationToken))
+        var workers = new Task[_welcomeIngress.PartitionCount];
+        for (var i = 0; i < workers.Length; i++)
+        {
+            workers[i] = ConsumeWelcomePartitionAsync(client, _welcomeIngress.GetReader(i), cancellationToken);
+        }
+
+        return Task.WhenAll(workers);
+    }
+
+    private async Task ConsumeWelcomePartitionAsync(
+        MezonClient client,
+        ChannelReader<WelcomeIngressItem> reader,
+        CancellationToken cancellationToken)
+    {
+        await foreach (var item in reader.ReadAllAsync(cancellationToken))
         {
             Interlocked.Decrement(ref _welcomeIngressDepth);
             try
             {
+                if (item.ClanId != 0 && item.UserId == client.BotId)
+                {
+                    // Monze itself was added to a clan: register it (and its owner) now
+                    // rather than at the next start-up (CAND-25).
+                    _logger.LogInformation("Monze was added to a clan; refreshing the clan registry.");
+                    await RefreshClansAsync(client, cancellationToken);
+                    continue;
+                }
+
                 if (item.IsBot || item.ClanId == 0 || item.UserId == 0)
                 {
                     _logger.LogDebug(
@@ -130,9 +161,16 @@ public sealed partial class MonzeBot
                         targets.Users,
                         targets.Roles,
                         targets.Channels);
-                    await channel.SendAsync(
+                    var ack = await channel.SendAsync(
                         rendered.Content,
                         mentions: rendered.Mentions);
+                    if (TryReadMessageId(ack) <= 0)
+                    {
+                        // SDK 1.6.2 answers a send the platform rejected with an
+                        // empty ack instead of throwing (WF-01).
+                        throw new InvalidOperationException("The platform rejected the welcome message.");
+                    }
+
                     _logger.LogInformation(
                         "Welcome message sent to the resolved public text channel.");
                 }
@@ -237,7 +275,7 @@ public sealed partial class MonzeBot
         return firstPublicText;
     }
 
-    private static async Task<(
+    private async Task<(
         IReadOnlyDictionary<string, (long Id, string Label)> Users,
         IReadOnlyDictionary<string, (long Id, string Label)> Roles,
         IReadOnlyDictionary<string, (long Id, string Label)> Channels,
@@ -256,6 +294,10 @@ public sealed partial class MonzeBot
             return (users, roles, channels, newUserLabel);
         }
 
+        // Target resolution is optional: the welcome still goes out with the
+        // configured text when a lookup fails. Each lookup is isolated so one
+        // failure does not silently drop the others, and every failure is
+        // logged because an unresolved placeholder is visible to the member.
         try
         {
             var memberList = await client.ListClanUsersAsync(
@@ -278,8 +320,28 @@ public sealed partial class MonzeBot
                 AddWelcomeTarget(users, member.User.Id, member.User.DisplayName);
                 AddWelcomeTarget(users, member.User.Id, member.ClanNick);
             }
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Welcome member lookup failed; user placeholders stay as plain text.");
+        }
 
-            if (client.Clans.TryGet(item.ClanId, out var clan))
+        Mezon.Net.Sdk.Entities.Clan? clan = null;
+        try
+        {
+            if (!client.Clans.TryGet(item.ClanId, out clan!))
+            {
+                clan = await client.GetClanAsync(item.ClanId, cancellationToken);
+            }
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Welcome clan lookup failed; role and channel placeholders stay as plain text.");
+        }
+
+        if (clan is not null)
+        {
+            try
             {
                 var roleList = await clan.ListRolesAsync(
                     limit: 1000,
@@ -292,7 +354,14 @@ public sealed partial class MonzeBot
                         AddWelcomeTarget(roles, role.Id, role.Title);
                     }
                 }
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "Welcome role lookup failed; role placeholders stay as plain text.");
+            }
 
+            try
+            {
                 var channelList = await clan.LoadChannelsAsync(
                     options: new RequestOptions { SocketSendTimeout = 5_000 });
                 for (var i = 0; i < channelList.Channeldesc.Count; i++)
@@ -301,11 +370,10 @@ public sealed partial class MonzeBot
                     AddWelcomeTarget(channels, channel.ChannelId, channel.ChannelLabel);
                 }
             }
-        }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            // Target resolution is optional. The welcome still goes out with the
-            // configured text when a directory lookup is temporarily unavailable.
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "Welcome channel lookup failed; channel placeholders stay as plain text.");
+            }
         }
 
         AddWelcomeTarget(users, item.UserId, newUserLabel);

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Coverage settings for the test campaign: only the four product assemblies are measured. -->
+<RunSettings>
+  <RunConfiguration>
+    <TreatNoTestsAsError>false</TreatNoTestsAsError>
+  </RunConfiguration>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="Code Coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <CodeCoverage>
+            <ModulePaths>
+              <Include>
+                <ModulePath>.*[\\/]Monze\.dll$</ModulePath>
+                <ModulePath>.*[\\/]Monze\.Domain\.dll$</ModulePath>
+                <ModulePath>.*[\\/]Monze\.Application\.dll$</ModulePath>
+                <ModulePath>.*[\\/]Monze\.Infrastructure\.dll$</ModulePath>
+              </Include>
+            </ModulePaths>
+            <Attributes>
+              <Exclude>
+                <Attribute>^System\.Diagnostics\.CodeAnalysis\.ExcludeFromCodeCoverageAttribute$</Attribute>
+              </Exclude>
+            </Attributes>
+            <CollectFromChildProcesses>True</CollectFromChildProcesses>
+            <EnableStaticNativeInstrumentation>False</EnableStaticNativeInstrumentation>
+            <EnableDynamicNativeInstrumentation>False</EnableDynamicNativeInstrumentation>
+          </CodeCoverage>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

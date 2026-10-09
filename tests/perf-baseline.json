@@ -1,0 +1,106 @@
+{
+  "schema": "monze.perf-baseline.v1",
+  "recordedUtc": "2026-10-08T10:21:44Z",
+  "runtime": ".NET 10.0.12",
+  "os": "Microsoft Windows 10.0.26200",
+  "processorCount": 14,
+  "job": "ShortRun",
+  "benchmarks": {
+    "CacheBenchmarks.CacheKeyHash": {
+      "meanNs": 9.708,
+      "allocatedBytes": 0
+    },
+    "CacheBenchmarks.L1Miss": {
+      "meanNs": 13.931,
+      "allocatedBytes": 0
+    },
+    "CacheBenchmarks.L1ReplaceNewerVersion": {
+      "meanNs": 147.811,
+      "allocatedBytes": 512
+    },
+    "IngressCallbackBenchmarks.MessageCallbackAccepted": {
+      "meanNs": 32.642,
+      "allocatedBytes": 0
+    },
+    "MonzeCacheHotPathBenchmarks.L1TypedKeyHit": {
+      "meanNs": 29.922,
+      "allocatedBytes": 0
+    },
+    "MonzeCapacityBenchmarks.ActiveClanIngressTryWrite [ClanCount=1, ActiveClanCount=100]": {
+      "meanNs": 29.648,
+      "allocatedBytes": 0
+    },
+    "MonzeCapacityBenchmarks.ActiveClanIngressTryWrite [ClanCount=10, ActiveClanCount=100]": {
+      "meanNs": 30.009,
+      "allocatedBytes": 0
+    },
+    "MonzeCapacityBenchmarks.ActiveClanIngressTryWrite [ClanCount=100, ActiveClanCount=100]": {
+      "meanNs": 30.803,
+      "allocatedBytes": 0
+    },
+    "MonzeCapacityBenchmarks.ActiveClanIngressTryWrite [ClanCount=1000, ActiveClanCount=100]": {
+      "meanNs": 30.138,
+      "allocatedBytes": 0
+    },
+    "MonzeHotPathBenchmarks.CommandArgumentsSingleItem": {
+      "meanNs": 0.555,
+      "allocatedBytes": 0
+    },
+    "MonzeHotPathBenchmarks.CommandRateLimitKnownKey": {
+      "meanNs": 17.826,
+      "allocatedBytes": 0
+    },
+    "MonzeHotPathBenchmarks.PartitionedIngressTryWrite": {
+      "meanNs": 29.071,
+      "allocatedBytes": 0
+    },
+    "MonzeMetricsBenchmarks.CommandInflightAndDuration": {
+      "meanNs": 2.507,
+      "allocatedBytes": 0
+    },
+    "MonzeMetricsBenchmarks.CommandModuleTag": {
+      "meanNs": 3.658,
+      "allocatedBytes": 0
+    },
+    "MonzeMetricsBenchmarks.UpstreamRateLimitCallback": {
+      "meanNs": 2.16,
+      "allocatedBytes": 0
+    },
+    "ParserBenchmarks.AgentSummaryPayload": {
+      "meanNs": 1784.099,
+      "allocatedBytes": 2688
+    },
+    "ParserBenchmarks.MeetingCommandSchedule": {
+      "meanNs": 130.629,
+      "allocatedBytes": 144
+    },
+    "ParserBenchmarks.MeetingScheduleForm": {
+      "meanNs": 1861.47,
+      "allocatedBytes": 552
+    },
+    "ParserBenchmarks.ScheduleNextDaily": {
+      "meanNs": 107.727,
+      "allocatedBytes": 0
+    },
+    "RateLimiterBenchmarks.KnownKeyOverLimit": {
+      "meanNs": 18.012,
+      "allocatedBytes": 0
+    },
+    "RateLimiterBenchmarks.NewKeyRejectedAtEntryBound": {
+      "meanNs": 12232.302,
+      "allocatedBytes": 0
+    },
+    "RendererBenchmarks.HelpCommandsPage": {
+      "meanNs": 2243.811,
+      "allocatedBytes": 13816
+    },
+    "RendererBenchmarks.ResultCard": {
+      "meanNs": 479.576,
+      "allocatedBytes": 7168
+    },
+    "RendererBenchmarks.WelcomeTemplate": {
+      "meanNs": 934.691,
+      "allocatedBytes": 6344
+    }
+  }
+}

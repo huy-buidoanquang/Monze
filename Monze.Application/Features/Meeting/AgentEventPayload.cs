@@ -14,6 +14,13 @@ public readonly record struct AgentEventPayload(
         {
             using var document = JsonDocument.Parse(rawResponse);
             var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                // Valid JSON that is not an object (an array, a number) carries no event fields (CAND-01).
+                payload = default;
+                return true;
+            }
+
             var roomId = TryReadRoomId(root);
             var voiceChannelId = TryReadVoiceChannelId(root);
             var clanId = TryReadPositiveLong(root, "clan_id");

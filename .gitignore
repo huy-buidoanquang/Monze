@@ -5,6 +5,9 @@ appsettings.*.local.json
 appsettings.secrets.json
 *.sqlite
 *.sqlite-*
+# Test campaign: only REPORT.md and campaign-summary.json are committed.
+docs/test-artifacts/*-campaign/raw/
+artifacts/campaign/
 
 
 ## Ignore Visual Studio temporary files, build results, and
@@ -158,6 +161,8 @@ ipch/
 
 # Visual Studio Trace Files
 *.e2e
+# ...but not the end-to-end test project (core.ignorecase matches *.E2E).
+!tests/Monze.Tests.E2E/
 
 # TFS 2012 Local Workspace
 $tf/
@@ -182,6 +187,8 @@ _TeamCity*
 
 # Coverlet is a free, cross platform Code Coverage Tool
 coverage*.json
+# Coverage floors of the test campaign (config, not output).
+!tests/coverage-thresholds.json
 coverage*.xml
 coverage*.info
 

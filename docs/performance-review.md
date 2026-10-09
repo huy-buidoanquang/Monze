@@ -29,7 +29,7 @@ Entries below the current cleanup baseline may mention community commands that w
 - Meeting selection treats the PostgreSQL `voice_claim` transaction as authoritative. A failed claim now returns a failed result, cancels the orphan request and prevents a success announcement; scheduled runs retry after one minute.
 - Event signup serializes on the event row and uses an index for confirmed and waitlisted entries. Capacity decisions stay in PostgreSQL and are never made from L1/L2 state.
 - Each live clan-wide voice refresh clears the prior occupancy for that clan's known voice candidates before applying the new snapshot. This prevents an omitted empty channel from retaining a stale occupied count.
-- AI and transcript HTTP responses are bounded before materialization (`2 MiB` for AI and `512 KiB` for transcript). STT retries only timeout/rate-limit/5xx responses once with a short backoff; AI requests do not retry automatically because an ambiguous provider timeout may already have been charged.
+- AI and transcript HTTP responses are bounded before materialization (`2 MiB` for AI and `8 MiB` for transcript, which carries the full meeting text; a larger transcript is logged as a warning). STT retries only timeout/rate-limit/5xx responses once with a short backoff; AI requests do not retry automatically because an ambiguous provider timeout may already have been charged.
 - Leaderboard display labels load one clan member snapshot and use the bounded L1 policy cache for 15 seconds, avoiding one `ListClanUsers` request per leaderboard row. The snapshot is display-only and is never used for authorization.
 - Automatic role rules are persisted in PostgreSQL and scanned with one bounded member snapshot per clan. The scan is serialized per clan, deduplicates point thresholds, skips already assigned roles, and retries failed assignments on the next interval. The current `ListClanUsers` contract is capped at 1,000 members, so large-clan role reconciliation remains bounded but is not a complete discovery guarantee until upstream pagination is available.
 - Meeting voice fallback filters event-discovered candidates with the same empty occupancy check as the primary channel list. Summary reads include `clan_id` in the repository predicate.
@@ -119,7 +119,7 @@ On 2026-09-28, BenchmarkDotNet ShortRun on .NET 10 x64 measured `BoundedIngressT
 
 - Message ingress now uses `PartitionedIngressQueue<ChannelMessageEventData>` with a fixed capacity and 16 power-of-two lanes. A message callback reads the SDK readonly payload, selects the lane by `clan_id`, and calls `TryWrite`; it does not await, serialize, access storage or log.
 - Each lane has one consumer, preserving ordering within a clan while allowing unrelated clans to be processed concurrently. Agent and welcome events remain on their dedicated bounded lanes, so critical event handling is not coupled to message-history persistence.
-- BenchmarkDotNet ShortRun on .NET 10 x64 measured `PartitionedIngressTryWrite` at **26.239 ns/op**, with no managed allocation and 0 Gen0/Gen1 collections. `WheelIndex` measured **0.825 ns/op**, also with no allocation.
+- BenchmarkDotNet ShortRun on .NET 10 x64 measured `PartitionedIngressTryWrite` at **26.239 ns/op**, with no managed allocation and 0 Gen0/Gen1 collections. `WheelIndex` measured **0.825 ns/op**, also with no allocation. Superseded on 2026-10-08 (DEF-02): this `PartitionedIngressTryWrite` figure timed the full-lane rejection path, because the benchmark drained the wrong lane.
 - The capacity benchmark includes a fixed in-memory registry with 1, 10, 100 or 1,000 clan entries and 100 active clans. `ActiveClanIngressTryWrite` measured **31.959 ns/op** at 1 clan, **30.274 ns/op** at 10, **30.090 ns/op** at 100 and **30.169 ns/op** at 1,000; all runs reported no managed allocation and 0 Gen0/Gen1 collections.
 - These numbers cover the bounded ingress data structure and registry lookup only. They do not prove end-to-end throughput, p99 queue latency, database QPS, Redis hit rate, RSS stability, SDK allocation behavior, upstream rate limits or 1,000-clan production capacity. Those remain live canary and soak gates.
 
@@ -258,6 +258,7 @@ On 2026-09-28, BenchmarkDotNet ShortRun on .NET 10 x64 measured `BoundedIngressT
 
 - BenchmarkDotNet ShortRun on .NET 10.0.12 x64 measured `PartitionedIngressTryWrite` at **27.974 ns/op**, `WheelIndex` at **0.710 ns/op**, `CommandArgumentsSingleItem` at **0.533 ns/op** and `CommandRateLimitKnownKey` at **22.396 ns/op**.
 - All four cases reported `Allocated = -` (0 B/op) and 0 Gen0/Gen1 collections. The harness ran with 3 warmup/3 measurement iterations and one launch.
+- Superseded on 2026-10-08 (DEF-02): this `PartitionedIngressTryWrite` figure timed the full-lane rejection path, because the benchmark drained the wrong lane.
 - These are isolated Monze data-structure and command-key measurements. They do not establish zero allocation for SDK callbacks, serialization, network, PostgreSQL, Redis, RSS stability or the 1,000-clan workload.
 
 ## Current Release restart and embed-field UI check (14:00–14:03, 2026-09-28)
@@ -341,7 +342,7 @@ On 2026-09-28, BenchmarkDotNet ShortRun on .NET 10 x64 measured `BoundedIngressT
   reading. This bounds one `session_done` transcript operation to 30 seconds instead
   of a possible roughly 4.5 minutes. That PostgreSQL and Redis enabled checkpoint was
   `176/176` in `docs/test-artifacts/20261002-transcript-timeout-full.trx`.
-- BenchmarkDotNet ShortRun measured `PartitionedIngressTryWrite` at `27.4787 ns/op`,
+- BenchmarkDotNet ShortRun measured `PartitionedIngressTryWrite` at `27.4787 ns/op` (Superseded on 2026-10-08 (DEF-02): this `PartitionedIngressTryWrite` figure timed the full-lane rejection path, because the benchmark drained the wrong lane.),
   `CommandArgumentsSingleItem` at `0.7986 ns/op` and
   `CommandRateLimitKnownKey` at `17.7406 ns/op`. Each reported no managed allocation
   and no GC collections in the measured operation.

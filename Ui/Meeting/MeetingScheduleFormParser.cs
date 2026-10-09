@@ -83,9 +83,11 @@ public static class MeetingScheduleFormParser
             return localDate.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
         }
 
+        // No offset format ("K"): parsing one converts to the server's time zone
+        // and can move the date; the branch below keeps the payload's date (CAND-12).
         if (DateTime.TryParseExact(
                 text,
-                ["yyyy-MM-dd", "yyyy-MM-ddTHH:mm:ss", "yyyy-MM-ddTHH:mm:ssK"],
+                ["yyyy-MM-dd", "yyyy-MM-ddTHH:mm:ss"],
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.AllowWhiteSpaces,
                 out localDate))

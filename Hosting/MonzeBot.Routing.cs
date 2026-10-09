@@ -29,7 +29,25 @@ public sealed partial class MonzeBot
 
         commands.AddCommand(MonzeCommandNames.Meeting, HandleMeetingAsync);
         commands.AddCommand(MonzeCommandNames.Summary, HandleSummaryAsync);
-        client.UseCommands(commands);
+
+        // What UseCommands does, but under the handler token and drain (RunHandlerAsync).
+        client.ChannelMessageReceived += evt =>
+        {
+            _ = ObserveCommandAsync(RunHandlerAsync(token => commands.HandleMessageAsync(client, evt, token)));
+            return Task.CompletedTask;
+        };
+    }
+
+    private static async Task ObserveCommandAsync(Task command)
+    {
+        try
+        {
+            await command;
+        }
+        catch (Exception)
+        {
+            // HandleMessageAsync reports handler failures itself; as with UseCommands, nothing else is.
+        }
     }
 
     private void ConfigureInteractions(MezonClient client)
@@ -132,9 +150,9 @@ public sealed partial class MonzeBot
             MonzeButtonId.WelcomeCancel,
             HandleWelcomeCancelAsync);
         client.MessageButtonClicked += evt =>
-            DispatchButtonInteractionAsync(client, interactions, evt);
+            RunHandlerAsync(token => DispatchButtonInteractionAsync(client, interactions, evt, token));
         client.DropdownBoxSelected += evt =>
-            DispatchSelectInteractionAsync(client, interactions, evt);
+            RunHandlerAsync(token => DispatchSelectInteractionAsync(client, interactions, evt, token));
     }
 
     private void RegisterPrivateButton(

@@ -1,4 +1,5 @@
 using Monze.Application.Ingress;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
@@ -38,4 +39,23 @@ public sealed class PartitionedIngressQueueTests
         Assert.False(queue.TryWrite(2, new IngressItem(2)));
     }
 
+    [Theory]
+    [Req("REQ-PERF-002")]
+    [InlineData(206L)]
+    [InlineData(2104288434238525440L)]
+    [InlineData(-5L)]
+    public void GetPartition_names_the_lane_that_receives_the_key(long key)
+    {
+        var queue = new PartitionedIngressQueue<IngressItem>(16, 64);
+
+        Assert.True(queue.TryWrite(key, new IngressItem(1)));
+
+        var partition = queue.GetPartition(key);
+        Assert.True(queue.GetReader(partition).TryRead(out var item));
+        Assert.Equal(1, item.Value);
+        for (var i = 0; i < queue.PartitionCount; i++)
+        {
+            Assert.False(queue.GetReader(i).TryRead(out _));
+        }
+    }
 }

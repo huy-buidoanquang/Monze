@@ -3,18 +3,23 @@ param(
     [long]$ClanId,
     [Parameter(Mandatory = $true)]
     [long]$ChannelId,
-    [switch]$Assert
+    [switch]$Assert,
+    # Inspects this database instead of Monze:Postgres from the settings files
+    # (the test campaign passes its throwaway container here).
+    [string]$ConnectionString
 )
 
 $ErrorActionPreference = 'Stop'
-$config = Get-Content (Join-Path $PSScriptRoot '..\appsettings.json') -Raw | ConvertFrom-Json
-$secretPath = Join-Path $PSScriptRoot '..\appsettings.secrets.json'
-if ([string]::IsNullOrWhiteSpace([string]$config.Monze.Postgres) -and (Test-Path -LiteralPath $secretPath)) {
-    $secret = Get-Content $secretPath -Raw | ConvertFrom-Json
-    $connectionString = [string]$secret.Monze.Postgres
-}
-else {
-    $connectionString = [string]$config.Monze.Postgres
+if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
+    $config = Get-Content (Join-Path $PSScriptRoot '..\appsettings.json') -Raw | ConvertFrom-Json
+    $secretPath = Join-Path $PSScriptRoot '..\appsettings.secrets.json'
+    if ([string]::IsNullOrWhiteSpace([string]$config.Monze.Postgres) -and (Test-Path -LiteralPath $secretPath)) {
+        $secret = Get-Content $secretPath -Raw | ConvertFrom-Json
+        $ConnectionString = [string]$secret.Monze.Postgres
+    }
+    else {
+        $ConnectionString = [string]$config.Monze.Postgres
+    }
 }
 if ([string]::IsNullOrWhiteSpace($connectionString)) {
     throw 'Monze.Postgres is not configured in appsettings.json or appsettings.secrets.json.'

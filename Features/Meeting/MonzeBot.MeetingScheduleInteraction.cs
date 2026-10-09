@@ -100,7 +100,7 @@ public sealed partial class MonzeBot
                 return;
             }
 
-            if (!await CompleteInteractionAsync(lease.Value, context.CancellationToken))
+            if (!await CompleteInteractionAsync(lease.Value))
             {
                 await MarkInteractionUncertainAsync(lease.Value);
                 lease = null;

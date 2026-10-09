@@ -1,0 +1,89 @@
+using Monze.Application.Commands;
+using Monze.Simulator;
+using Monze.Testing;
+using Monze.Tests.E2E.Harness;
+using Monze.Ui;
+using Xunit;
+using static Monze.Tests.E2E.Harness.AreaWorld;
+
+namespace Monze.Tests.E2E.Areas;
+
+/// <summary>
+/// Routing of unrecognised input and clans Monze does not know: an unknown
+/// sub-command of the root gets the documented hint; an unknown prefixed
+/// command, plain chat and a direct message (clan 0) get no answer; a clan
+/// the bot joined after start-up is answered, but no one there has admin
+/// rights because the clan registry is only refreshed at start-up.
+/// </summary>
+public sealed class CommandRoutingAreaTests
+{
+    [DbFact]
+    [Req("REQ-CMD-001")]
+    [Covers("cmd:monze", "msg:UnknownCommand", "msg:TitleMonze")]
+    public async Task Unknown_input_gets_the_documented_hint_or_no_answer()
+    {
+        await using var host = await E2EActions.StartAsync("routing_unknown");
+        var mark = await E2EOracles.MarkAsync(host, snapshot: true);
+
+        var unknownModule = await E2EActions.CommandAsync(host, GeneralId, MemberId, "*monze dance");
+        var unknownCommand = await E2EActions.IgnoredAsync(host, () => host.Inbound.SayAsync(ClanId, GeneralId, MemberId, "*dance now"));
+        var chat = await E2EActions.IgnoredAsync(host, () => host.Inbound.SayAsync(ClanId, GeneralId, MemberId, "hello monze"));
+        var direct = await E2EActions.IgnoredAsync(host, () => host.Inbound.SayDirectAsync(DirectId, MemberId, "*monze help"));
+        Assert.Equal(1, direct.DeliveredSessions);
+        // The SDK resolves the direct channel (clan 0) before giving up.
+        await host.Recorder.WaitForAsync(static action => action.Operation == SimOperations.ListChannelDetail && action.ChannelId == DirectId, E2EOracles.Timeout, mark.Sequence);
+        await Task.Delay(300);
+
+        // Regression for CAND-26: the ignored direct command is at least logged.
+        await E2EActions.WaitForLogsAsync(host, static entry => entry.Message.StartsWith("A Monze command sent in a direct message was ignored", StringComparison.Ordinal), 1);
+
+        await E2EOracles.AssertAsync(host, mark, new ScenarioExpectation
+        {
+            Inputs = ScenarioExpectation.Of(
+                (unknownModule, ResponseKind.Reply),
+                (unknownCommand, ResponseKind.None),
+                (chat, ResponseKind.None),
+                (direct, ResponseKind.None)).Inputs,
+            Unauthorized = true
+        });
+        var hint = E2EContent.Parse(E2EActions.NewMessageAfter(host, unknownModule, GeneralId));
+        Assert.Equal(MonzeMessages.TitleMonze, hint.Embeds![0].Title);
+        Assert.Equal(MonzeMessages.UnknownCommand(MonzeCommandOptions.Default), hint.Embeds![0].Fields![0].Value);
+    }
+
+    /// <summary>
+    /// Regression for CAND-25: a clan Monze is added to after start-up used
+    /// to stay unregistered until a restart, so its owner was answered as a
+    /// plain member. It is now registered when the bot's own join arrives.
+    /// </summary>
+    [DbFact]
+    [Req("REQ-CMD-001", "REQ-CONN-001")]
+    [Covers("msg:DelegateMustBeClanMember")]
+    public async Task A_clan_joined_after_start_up_is_registered_with_its_owner()
+    {
+        await using var host = await E2EActions.StartAsync("routing_late_clan");
+        var join = await E2EOracles.MarkAsync(host);
+        var added = await host.Inbound.UserAddedAsync(LateClanId, BotId, isBot: true);
+        Assert.Equal(1, added.DeliveredSessions);
+        await host.Recorder.WaitForAsync(static action => action.Kind == SimActionKind.ClanJoin && action.ClanId == LateClanId && action.ResponseCode == 0, E2EOracles.Timeout, join.Sequence);
+        await E2EActions.WaitUntilAsync(
+            host,
+            async () => await host.ScalarAsync<long>("SELECT count(*) FROM clan_registry WHERE clan_id = @clan AND owner_id = @owner;", ("clan", LateClanId), ("owner", LateOwnerId)) == 1,
+            "the late clan to be registered with its owner");
+
+        var mark = await E2EOracles.MarkAsync(host, snapshot: true);
+        var help = await E2EActions.CommandAsync(host, LateGeneralId, LateOwnerId, "*monze help", clanId: LateClanId);
+        var setup = await E2EActions.CommandAsync(host, LateGeneralId, LateOwnerId, "*setup admin add @owner", [OwnerId], clanId: LateClanId);
+
+        await E2EOracles.AssertAsync(host, mark, new ScenarioExpectation
+        {
+            Inputs = ScenarioExpectation.Of((help, ResponseKind.Ephemeral), (setup, ResponseKind.Reply)).Inputs,
+            Unauthorized = true
+        });
+        // The owner sees the owner's menu and is refused only because the
+        // mentioned user is not a member of this clan.
+        var menu = E2EActions.NewMessageAfter(host, help, LateGeneralId);
+        Assert.Contains(MonzeButtonId.HelpSetup, E2EContent.Buttons(menu));
+        Assert.Contains(MonzeMessages.DelegateMustBeClanMember, E2EContent.Visible(E2EActions.NewMessageAfter(host, setup, LateGeneralId)));
+    }
+}

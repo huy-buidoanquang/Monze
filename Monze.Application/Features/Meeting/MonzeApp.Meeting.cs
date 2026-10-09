@@ -5,6 +5,9 @@ namespace Monze.Application;
 
 public sealed partial class MonzeApp
 {
+    /// <summary>A new schedule this close to another one the creator can see is reported (CAND-27).</summary>
+    private static readonly TimeSpan ScheduleOverlapWindow = TimeSpan.FromMinutes(30);
+
     public async Task<CommandOutcome> HandleMeetingAsync(
         long clanId,
         long channelId,
@@ -55,13 +58,18 @@ public sealed partial class MonzeApp
                     request.Kind,
                     request.WhenText!,
                     timeZoneId,
-                    DateTimeOffset.UtcNow,
+                    _time.GetUtcNow(),
                     out var next,
                     out var error))
             {
                 return Say(error ?? MonzeMessages.InvalidTime);
             }
 
+            // CAND-27: warn about the creator's other schedules here (all of them for an admin) that
+            // run less than 30 minutes from this one; the list is read before this one is saved.
+            var nearby = (await _scheduling.ListMeetingSchedulesAsync(clanId, channelId, userId, 20, cancellationToken))
+                .Where(schedule => (schedule.NextRunAt - next).Duration() < ScheduleOverlapWindow)
+                .ToList();
             var scheduleId = await _scheduling.CreateMeetingScheduleAsync(
                 clanId,
                 channelId,
@@ -72,13 +80,15 @@ public sealed partial class MonzeApp
                 timeZoneId,
                 next,
                 cancellationToken);
-            return Say(MonzeMessages.ScheduleSaved(
+            var saved = MonzeMessages.ScheduleSaved(
                 request.Name ?? "Cuộc họp",
                 scheduleId,
                 request.Kind,
-                next),
-                title: MonzeMessages.TitleMeeting,
-                tone: MonzeTone.Ok);
+                next,
+                timeZoneId);
+            return nearby.Count == 0
+                ? Say(saved, title: MonzeMessages.TitleMeeting, tone: MonzeTone.Ok)
+                : Say(saved + "\n" + MonzeMessages.ScheduleOverlap(nearby), title: MonzeMessages.TitleMeeting, tone: MonzeTone.Warn);
         }
 
         var voice = await pickVoice(cancellationToken);
@@ -91,7 +101,7 @@ public sealed partial class MonzeApp
         if (!await _meeting.SuggestMeetingAsync(
                 sessionId,
                 voice.VoiceChannelId,
-                DateTimeOffset.UtcNow.AddMinutes(20),
+                _time.GetUtcNow().AddMinutes(20),
                 cancellationToken,
                 voice.Label))
         {

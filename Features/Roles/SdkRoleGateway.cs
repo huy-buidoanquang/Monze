@@ -74,7 +74,9 @@ public sealed class SdkRoleGateway : IMezonRoleGateway
             var joinedAt = member.User.JoinTimeSeconds == 0
                 ? (DateTimeOffset?)null
                 : DateTimeOffset.FromUnixTimeSeconds(member.User.JoinTimeSeconds);
-            members.Add(new MemberRoleSnapshot(member.User.Id, false, joinedAt, roleIds));
+            // ClanUserList has no bot flag (docs/mezon-net-handoff.md, clan roster
+            // bot identity); Monze can at least recognise itself (CAND-23).
+            members.Add(new MemberRoleSnapshot(member.User.Id, member.User.Id == _client.BotId, joinedAt, roleIds));
         }
 
         cancellationToken.ThrowIfCancellationRequested();

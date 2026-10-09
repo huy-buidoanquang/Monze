@@ -36,6 +36,8 @@ The final runtime restart logged `Partitions=16, Capacity=8192` and rejoined all
 
 BenchmarkDotNet ShortRun on .NET 10.0.12 x64 measured `PartitionedIngressTryWrite` at 27.974 ns/op, `WheelIndex` at 0.710 ns/op, `CommandArgumentsSingleItem` at 0.533 ns/op and `CommandRateLimitKnownKey` at 22.396 ns/op. Every case reported 0 B/op and 0 Gen0/Gen1 collections.
 
+> Superseded on 2026-10-08 for `PartitionedIngressTryWrite` only (DEF-02): the benchmark drained lane 0 while the key wrote to another lane, so after 512 writes it timed the full-lane rejection path. The fixed benchmark reads the key's lane and fails on any rejected write; see the latest campaign report for current numbers.
+
 This strengthens the isolated callback/command microbenchmark evidence. It does not close the 1,000-clan gate, because the required database, Redis, SDK, outbox, RSS, reconnect, upstream rate-limit and two-hour soak measurements were not part of this run.
 
 ## Current bounded ingress rerun (2026-09-28 10:53)
@@ -196,7 +198,7 @@ Event capacity and waitlist are transactionally enforced; the PostgreSQL integra
   lease, completed and uncertain rows rejected replay, and the Agent pending-event
   key is unique by `(room_id, event_type)`.
 - BenchmarkDotNet measured the isolated bounded ingress operation at `27.4787 ns/op`
-  with no managed allocation. A 30-second in-process profile at 1,000 registered
+  with no managed allocation (Superseded on 2026-10-08 (DEF-02): this `PartitionedIngressTryWrite` figure timed the full-lane rejection path, because the benchmark drained the wrong lane.) A 30-second in-process profile at 1,000 registered
   clans, 100 active clans, 200 messages/s, 20 commands/s, 100 meeting candidates and
   200 outbox items/s completed with zero drops/rejects; maximum ingress and outbox
   depth were 4 and 5. The measured heap maximum was 2,867,528 bytes, RSS maximum was

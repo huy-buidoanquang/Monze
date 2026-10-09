@@ -188,6 +188,19 @@ public static partial class MonzeMessageBuilder
             rows);
     }
 
+    /// <summary>
+    /// CAND-27: told privately to a schedule's requester when no voice room is
+    /// free at its time, with the schedule's cancel button.
+    /// </summary>
+    public static MessageContent SchedulePostponed(string name, long scheduleId)
+        => BuildWithRows(
+            MonzeMessages.TitleMeeting,
+            MonzeEmbedColors.For(MonzeTone.Warn),
+            [new MessageEmbedField("Lịch họp", MonzeMessages.SchedulePostponed(name, scheduleId))],
+            [new ButtonBuilder()
+                .AddButton(MeetingButtonId.CancelFor(scheduleId), $"Hủy #{scheduleId}", style: (int)MessageButtonStyle.Danger)
+                .BuildComponents()]);
+
     public static MessageContent MeetingScheduleForm(string? error = null)
     {
         var fields = new List<MessageEmbedField>(5);
@@ -239,21 +252,7 @@ public static partial class MonzeMessageBuilder
     }
 
     private static string FormatScheduleTime(MeetingScheduleSummary schedule)
-    {
-        try
-        {
-            var zone = TimeZoneInfo.FindSystemTimeZoneById(schedule.TimeZoneId);
-            return $"{TimeZoneInfo.ConvertTime(schedule.NextRunAt, zone):dd/MM/yyyy HH:mm} ({schedule.TimeZoneId})";
-        }
-        catch (TimeZoneNotFoundException)
-        {
-            return $"{schedule.NextRunAt:dd/MM/yyyy HH:mm} UTC";
-        }
-        catch (InvalidTimeZoneException)
-        {
-            return $"{schedule.NextRunAt:dd/MM/yyyy HH:mm} UTC";
-        }
-    }
+        => LocalSchedule.Describe(schedule.NextRunAt, schedule.TimeZoneId);
 
     private static string FormatScheduleKind(MeetingScheduleSummary schedule)
         => schedule.Kind switch

@@ -74,20 +74,6 @@ public sealed partial class PostgresMeetingRepository : IMeetingRepository
             await tx.RollbackAsync(cancellationToken);
             return false;
         }
-        await using (var closePreviousContext = new NpgsqlCommand("""
-            UPDATE meeting_session
-            SET context_closed_at = COALESCE(context_closed_at, now())
-            WHERE clan_id = (SELECT clan_id FROM meeting_session WHERE id = @id)
-              AND voice_channel_id = @voice
-              AND root_session_id IS NULL
-              AND context_closed_at IS NULL
-              AND id <> @id;
-            """, connection, tx))
-        {
-            closePreviousContext.Parameters.AddWithValue("id", sessionId);
-            closePreviousContext.Parameters.AddWithValue("voice", voiceChannelId);
-            await closePreviousContext.ExecuteNonQueryAsync(cancellationToken);
-        }
         await using (var expirePrevious = new NpgsqlCommand("""
             UPDATE meeting_session AS previous
             SET status = 'expired', claim_until = NULL
@@ -128,6 +114,23 @@ public sealed partial class PostgresMeetingRepository : IMeetingRepository
             await revert.ExecuteNonQueryAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
             return false;
+        }
+
+        // Only a suggestion that won the room closes the room's previous context;
+        // a losing one must leave the meeting holding the room untouched (CAND-15).
+        await using (var closePreviousContext = new NpgsqlCommand("""
+            UPDATE meeting_session
+            SET context_closed_at = COALESCE(context_closed_at, now())
+            WHERE clan_id = (SELECT clan_id FROM meeting_session WHERE id = @id)
+              AND voice_channel_id = @voice
+              AND root_session_id IS NULL
+              AND context_closed_at IS NULL
+              AND id <> @id;
+            """, connection, tx))
+        {
+            closePreviousContext.Parameters.AddWithValue("id", sessionId);
+            closePreviousContext.Parameters.AddWithValue("voice", voiceChannelId);
+            await closePreviousContext.ExecuteNonQueryAsync(cancellationToken);
         }
 
         await tx.CommitAsync(cancellationToken);
@@ -342,6 +345,30 @@ public sealed partial class PostgresMeetingRepository : IMeetingRepository
                 reader.IsDBNull(9) ? null : reader.GetInt64(9),
                 reader.IsDBNull(10) ? null : reader.GetInt64(10),
                 MeetingStatus.Live);
+        }
+
+        if (!matchedExistingRoom)
+        {
+            // The Agent started a new room in this voice channel, so any other
+            // session still live here lost its room_ended: end it like room_ended
+            // would, so its summary is fetched and one room has one live session (DEF-12).
+            await using var endStale = new NpgsqlCommand("""
+                UPDATE meeting_session
+                SET status = 'summary_pending',
+                    ended_at = COALESCE(ended_at, now()),
+                    summary_next_attempt_at = COALESCE(summary_next_attempt_at, now()),
+                    summary_last_error = NULL,
+                    summary_locked_until = NULL,
+                    summary_lease_token = NULL
+                WHERE clan_id = @clan
+                  AND voice_channel_id = @voice
+                  AND status = 'live'
+                  AND id <> @session;
+                """, connection, transaction);
+            endStale.Parameters.AddWithValue("clan", clanId);
+            endStale.Parameters.AddWithValue("voice", voiceChannelId);
+            endStale.Parameters.AddWithValue("session", binding.SessionId);
+            await endStale.ExecuteNonQueryAsync(cancellationToken);
         }
 
         var hasPendingAgentCompletion = false;

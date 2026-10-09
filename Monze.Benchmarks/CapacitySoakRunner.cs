@@ -113,7 +113,6 @@ internal static class CapacitySoakRunner
                             clanId,
                             clanId * 100,
                             MonzeCommandNames.Meeting,
-                            DateTimeOffset.UtcNow,
                             out _))
                     {
                         metrics.CommandRejects++;

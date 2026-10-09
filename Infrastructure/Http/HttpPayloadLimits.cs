@@ -2,6 +2,7 @@ namespace Monze;
 
 internal static class HttpPayloadLimits
 {
-    internal const int TranscriptResponseBytes = 512 * 1024;
+    // A summary response carries the full transcript; a long meeting exceeds 512 KiB.
+    internal const int TranscriptResponseBytes = 8 * 1024 * 1024;
     internal const int AiResponseBytes = 2 * 1024 * 1024;
 }

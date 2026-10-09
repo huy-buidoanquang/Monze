@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using Microsoft.Extensions.Logging;
+using Monze.Testing;
 using Xunit;
 
 namespace Monze.Tests;
@@ -173,6 +175,73 @@ public sealed class HttpTranscriptClientTests
         Assert.Equal("2026-10-01T10:00:00.0000000+00:00", result.CreatedAt?.ToString("O"));
     }
 
+    [Fact]
+    [Req("REQ-TIME-001")]
+    public async Task FetchSummary_reuses_the_access_token_until_the_injected_clock_nears_expiry()
+    {
+        var handler = new HttpTranscriptRecordingHandler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v2/auth/mezon/bot/login" => Json(HttpStatusCode.OK, "{\"access_token\":\"access-1\",\"refresh_token\":\"refresh-1\",\"expires_in\":3600}"),
+            "/api/v2/auth/refresh" => Json(HttpStatusCode.OK, "{\"access_token\":\"access-2\",\"refresh_token\":\"refresh-2\",\"expires_in\":3600}"),
+            "/api/v2/summary/room/id/room-1" => request.Headers.Authorization?.Parameter == "access-2"
+                ? AuthorizedSummary(request, "access-2")
+                : AuthorizedSummary(request, "access-1"),
+            _ => Json(HttpStatusCode.NotFound, "{}")
+        });
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://agent.test/") };
+        using var client = new Monze.HttpTranscriptClient(http, 123, "bot-token", time);
+
+        await client.FetchSummaryAsync("room-1", CancellationToken.None);
+        time.Advance(TimeSpan.FromSeconds(3_569));
+        await client.FetchSummaryAsync("room-1", CancellationToken.None);
+        Assert.Equal(3, handler.Requests.Count);
+
+        time.Advance(TimeSpan.FromSeconds(1));
+        var result = await client.FetchSummaryAsync("room-1", CancellationToken.None);
+
+        Assert.Equal("đã xong", result?.Summary);
+        Assert.Equal(5, handler.Requests.Count);
+        Assert.Equal("/api/v2/auth/refresh", handler.Requests[3].RequestUri!.AbsolutePath);
+        Assert.Equal("access-2", handler.Requests[4].Headers.Authorization?.Parameter);
+    }
+
+    /// <summary>
+    /// Regression for WF-03: the summary response carries the full transcript,
+    /// so a long meeting is larger than the old 512 KiB bound. It is read; a
+    /// response over the bound is reported instead of read as "no summary".
+    /// </summary>
+    [Fact]
+    [Req("REQ-MTG-004")]
+    public async Task FetchSummary_reads_a_long_transcript_and_reports_one_over_the_limit()
+    {
+        var fullText = new string('a', 600 * 1024);
+        var oversized = false;
+        var handler = new HttpTranscriptRecordingHandler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/api/v2/auth/mezon/bot/login" => Json(HttpStatusCode.OK, "{\"access_token\":\"access-1\",\"refresh_token\":\"refresh-1\",\"expires_in\":3600}"),
+            "/api/v2/summary/room/id/room-1" => Json(
+                HttpStatusCode.OK,
+                "{\"status\":\"ok\",\"data\":{\"room_id\":\"room-1\",\"summary_data\":{\"summary\":\"đã xong\"},\"full_text\":\""
+                    + (oversized ? new string('a', Monze.HttpPayloadLimits.TranscriptResponseBytes) : fullText)
+                    + "\"}}"),
+            _ => Json(HttpStatusCode.NotFound, "{}")
+        });
+        var logger = new WarningLogger();
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://agent.test/") };
+        using var client = new Monze.HttpTranscriptClient(http, 123, "bot-token", logger: logger);
+
+        var result = await client.FetchSummaryAsync("room-1", CancellationToken.None);
+
+        Assert.Equal("đã xong", result?.Summary);
+        Assert.Equal(fullText.Length, result?.FullText?.Length);
+        Assert.Equal(0, logger.Warnings);
+
+        oversized = true;
+        Assert.Null(await client.FetchSummaryAsync("room-1", CancellationToken.None));
+        Assert.Equal(1, logger.Warnings);
+    }
+
     private static HttpResponseMessage AuthorizedSummary(HttpRequestMessage request, string expectedToken)
     {
         if (!string.Equals(request.Headers.Authorization?.Parameter, expectedToken, StringComparison.Ordinal))
@@ -191,4 +260,21 @@ public sealed class HttpTranscriptClientTests
             Content = new StringContent(body, Encoding.UTF8, "application/json")
         };
 
+    private sealed class WarningLogger : ILogger
+    {
+        public int Warnings { get; private set; }
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning)
+            {
+                Warnings++;
+            }
+        }
+    }
 }

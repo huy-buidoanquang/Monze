@@ -1,0 +1,27 @@
+<Project>
+  <!--
+    Monze.csproj copies appsettings.json (which holds real local secrets) to
+    every project that references it. Test, benchmark and campaign outputs must
+    never carry that file, so remove it from the copy list and delete any copy
+    left behind by an earlier build.
+  -->
+  <Target Name="MonzeStripAppSettingsFromOutput" AfterTargets="GetCopyToOutputDirectoryItems">
+    <ItemGroup>
+      <_MonzeAppSettingsItem
+        Include="@(AllItemsFullPathWithTargetPath)"
+        Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(AllItemsFullPathWithTargetPath.TargetPath)', '(?i)^appsettings.*\.json$'))" />
+      <AllItemsFullPathWithTargetPath Remove="@(_MonzeAppSettingsItem)" />
+      <_SourceItemsToCopyToOutputDirectory Remove="@(_MonzeAppSettingsItem)" />
+      <_SourceItemsToCopyToOutputDirectoryAlways Remove="@(_MonzeAppSettingsItem)" />
+      <_TransitiveItemsToCopyToOutputDirectory Remove="@(_MonzeAppSettingsItem)" />
+      <_TransitiveItemsToCopyToOutputDirectoryAlways Remove="@(_MonzeAppSettingsItem)" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="MonzeDeleteStaleAppSettings" AfterTargets="Build">
+    <ItemGroup>
+      <_MonzeStaleAppSettings Include="$(OutDir)appsettings*.json" />
+    </ItemGroup>
+    <Delete Files="@(_MonzeStaleAppSettings)" />
+  </Target>
+</Project>

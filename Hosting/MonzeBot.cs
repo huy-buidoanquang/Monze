@@ -41,15 +41,22 @@ public sealed partial class MonzeBot : BackgroundService
     private readonly MonzeCommandOptions _commandOptions;
     private readonly MonzeConnectionRetryOptions _connectionRetryOptions;
     private readonly MonzeCommandRateLimiter _commandRateLimiter;
+    private readonly StartupReadiness _readiness;
+    private readonly TimeProvider _time;
+    private readonly MonzeWorkerTimings _timings;
+    private readonly MonzeClientCustomization? _clientCustomization;
+    private readonly int _maxCommandsInFlight;
     private readonly IEventIngressQueue<ChannelMessageEventData> _messageIngress;
     private readonly Channel<MessageGapIngressItem> _messageGapIngress;
     private readonly Channel<MeetingIngressItem> _meetingIngress;
-    private readonly Channel<WelcomeIngressItem> _welcomeIngress;
+    private readonly PartitionedIngressQueue<WelcomeIngressItem> _welcomeIngress;
     private readonly ConcurrentDictionary<VoiceKey, int> _voiceOccupancy = new();
     private readonly ConcurrentDictionary<long, ConcurrentDictionary<long, byte>> _voiceChannelsByClan = new();
     private readonly ConcurrentDictionary<long, long> _voiceClanByChannel = new();
     private readonly ConcurrentDictionary<long, long> _welcomeChannelIds = new();
     private readonly VoiceSnapshotGuard _voiceSnapshots = new();
+    private const int MessageGapOverflowLimit = 4096;
+    private readonly ConcurrentDictionary<ChannelPolicyKey, long> _overflowedGaps = new();
     private readonly ConcurrentDictionary<long, SemaphoreSlim> _voiceSelectionGates = new();
     private readonly SemaphoreSlim _clanJoinGate = new(1, 1);
     private IReadOnlyList<KnownClan> _knownClans = Array.Empty<KnownClan>();
@@ -60,8 +67,12 @@ public sealed partial class MonzeBot : BackgroundService
     private long _messageIngressDepth;
     private long _messageGapIngressDepth;
     private long _agentIngressDepth;
+    private AgentEventStream? _agentEvents;
     private long _welcomeIngressDepth;
+    private long _agentPendingWriters;
+    private long _welcomePendingWriters;
     private long _outboxInFlight;
+    private int _commandsInFlight;
     private SqliteMessageStore? _messages;
 
     public MonzeBot(
@@ -86,7 +97,11 @@ public sealed partial class MonzeBot : BackgroundService
         MonzeCommandOptions commandOptions,
         MonzeConnectionRetryOptions connectionRetryOptions,
         MonzeCommandRateLimiter commandRateLimiter,
-        ILogger<MonzeBot> logger)
+        StartupReadiness readiness,
+        TimeProvider time,
+        MonzeWorkerTimings timings,
+        ILogger<MonzeBot> logger,
+        MonzeClientCustomization? clientCustomization = null)
     {
         _configuration = configuration;
         _app = app;
@@ -109,7 +124,12 @@ public sealed partial class MonzeBot : BackgroundService
         _commandOptions = commandOptions;
         _connectionRetryOptions = connectionRetryOptions;
         _commandRateLimiter = commandRateLimiter;
+        _readiness = readiness;
+        _time = time;
+        _timings = timings;
         _logger = logger;
+        _clientCustomization = clientCustomization;
+        _maxCommandsInFlight = Math.Clamp(configuration.GetValue("Monze:Commands:MaxInFlight", 64), 1, 4096);
         var weakSelf = new WeakReference<MonzeBot>(this);
         MonzeMetrics.RegisterRuntimeState(
             () => weakSelf.TryGetTarget(out var bot)
@@ -126,6 +146,12 @@ public sealed partial class MonzeBot : BackgroundService
                 : 0,
             () => weakSelf.TryGetTarget(out var bot)
                 ? Volatile.Read(ref bot._outboxInFlight)
+                : 0,
+            () => weakSelf.TryGetTarget(out var bot)
+                ? Volatile.Read(ref bot._agentPendingWriters)
+                : 0,
+            () => weakSelf.TryGetTarget(out var bot)
+                ? Volatile.Read(ref bot._welcomePendingWriters)
                 : 0);
         var redisCache = _readModelCache as Monze.Infrastructure.Caching.MonzeReadModelCache;
         _logger.LogInformation(
@@ -166,19 +192,15 @@ public sealed partial class MonzeBot : BackgroundService
                 SingleWriter = false,
                 AllowSynchronousContinuations = false
             });
-        _welcomeIngress = Channel.CreateBounded<WelcomeIngressItem>(
-            new BoundedChannelOptions(1024)
-            {
-                FullMode = BoundedChannelFullMode.Wait,
-                SingleReader = true,
-                SingleWriter = false,
-                AllowSynchronousContinuations = false
-            });
+        // One lane per clan hash: a slow welcome delays only its own lane (DEF-04).
+        _welcomeIngress = new PartitionedIngressQueue<WelcomeIngressItem>(WelcomePartitions, 1024);
     }
+
+    private OutcomeTimeout NewOutcomeTimeout() => new(_runtimeToken, _timings.UncertainMarkTimeout, _time);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await StartupSchemaValidator.Ready.WaitAsync(stoppingToken);
+        await _readiness.Ready.WaitAsync(stoppingToken);
         var botId = _configuration.GetValue<long>("Mezon:BotId");
         var token = _configuration["Mezon:Token"];
         if (botId == 0 || string.IsNullOrWhiteSpace(token))
@@ -196,30 +218,7 @@ public sealed partial class MonzeBot : BackgroundService
             _configuration["Monze:EnvironmentName"] ?? "dev");
         _messages = await SqliteMessageStore.OpenAsync(path, stoppingToken);
 
-        var options = new MezonClientOptions(
-            botId,
-            token,
-            _configuration["Mezon:Host"] ?? "gw.mezon.ai",
-            _configuration["Mezon:Port"] ?? "443",
-            _configuration.GetValue("Mezon:UseSsl", true))
-        {
-            TransportType = ResolveTransportType(_configuration["Mezon:Transport"]),
-            AgentEventUrl = _configuration["Mezon:AgentBaseUrl"] ?? string.Empty,
-            MaxTransportRequestsPerSecond = Math.Clamp(
-                _configuration.GetValue("Mezon:RateLimit:RequestsPerSecond", 60),
-                1,
-                1000),
-            MaxTransportRequestsPerMinute = Math.Clamp(
-                _configuration.GetValue("Mezon:RateLimit:RequestsPerMinute", 500),
-                1,
-                10000),
-            MaxConnectRequestsPerSecond = Math.Clamp(
-                _configuration.GetValue("Mezon:RateLimit:ConnectRequestsPerSecond", 2),
-                1,
-                100),
-            SocketHandlerTimeoutInMilliseconds = null
-        };
-
+        var options = CreateClientOptions(_configuration, botId, token, _clientCustomization);
         await using var client = new MezonClient(options);
         _app.AttachRoleGateway(new SdkRoleGateway(client, _logger));
         ConfigureCommands(client);
@@ -233,9 +232,11 @@ public sealed partial class MonzeBot : BackgroundService
         var messageWorker = ConsumeMessagesAsync(runtimeToken);
         var messageGapWorker = ConsumeMessageGapsAsync(runtimeToken);
         var agentWorker = ConsumeAgentEventsAsync(client, runtimeToken);
+        var summaryWorker = ConsumeSummaryFetchesAsync(runtimeToken);
         var welcomeWorker = ConsumeWelcomeAsync(client, runtimeToken);
         var roleWorker = Task.CompletedTask;
         var outboxWorker = Task.CompletedTask;
+        AgentEventStream? agentEvents = null;
 
         try
         {
@@ -246,10 +247,20 @@ public sealed partial class MonzeBot : BackgroundService
                 runtimeToken);
             if (!string.IsNullOrWhiteSpace(options.AgentEventUrl))
             {
-                await client.ConnectAgentSseAsync(runtimeToken);
+                agentEvents = new AgentEventStream(
+                    options.AgentEventUrl,
+                    botId,
+                    token,
+                    TimeSpan.FromSeconds(Math.Clamp(_configuration.GetValue("Mezon:AgentSse:IdleTimeoutSeconds", 45), 1, 3600)),
+                    _time,
+                    _logger,
+                    RouteAgentEventAsync,
+                    Path.ChangeExtension(path, ".agent-cursor"));
+                _agentEvents = agentEvents;
+                await agentEvents.ConnectAsync(runtimeToken);
             }
 
-            outboxWorker = RunOutboxWorkerAsync(client, runtimeToken);
+            outboxWorker = RunOutboxWorkerAsync(client, CreateOutboxPacer(_configuration, options, _time), runtimeToken);
             roleWorker = ConsumeAutomaticRoleRulesAsync(runtimeToken);
 
             while (!runtimeToken.IsCancellationRequested)
@@ -267,7 +278,7 @@ public sealed partial class MonzeBot : BackgroundService
                     _logger.LogWarning(ex, "Monze worker iteration failed; retrying.");
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(1), runtimeToken);
+                await Task.Delay(_timings.SchedulerInterval, _time, runtimeToken);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -282,15 +293,22 @@ public sealed partial class MonzeBot : BackgroundService
         {
             client.ChannelMessageReceived -= EnqueueMessageAsync;
             runtimeCts.Cancel();
+            if (agentEvents is not null)
+            {
+                await agentEvents.DisposeAsync();
+            }
+
             _messageIngress.Complete();
             _meetingIngress.Writer.TryComplete();
-            _welcomeIngress.Writer.TryComplete();
+            _summaryFetches.Writer.TryComplete();
+            _welcomeIngress.Complete();
             try
             {
                 await Task.WhenAll(
                     messageWorker,
                     messageGapWorker,
                     agentWorker,
+                    summaryWorker,
                     welcomeWorker,
                     roleWorker,
                     outboxWorker);
@@ -302,7 +320,62 @@ public sealed partial class MonzeBot : BackgroundService
             {
                 _messageGapIngress.Writer.TryComplete();
             }
+
+            await DrainHandlersAsync();
         }
+    }
+
+    internal static MezonClientOptions CreateClientOptions(
+        IConfiguration configuration,
+        long botId,
+        string token,
+        MonzeClientCustomization? customization)
+    {
+        var perMinute = Math.Clamp(
+            configuration.GetValue("Mezon:RateLimit:RequestsPerMinute", 500),
+            1,
+            10000);
+        var options = new MezonClientOptions(
+            botId,
+            token,
+            configuration["Mezon:Host"] ?? "gw.mezon.ai",
+            configuration["Mezon:Port"] ?? "443",
+            configuration.GetValue("Mezon:UseSsl", true))
+        {
+            TransportType = ResolveTransportType(configuration["Mezon:Transport"]),
+            AgentEventUrl = configuration["Mezon:AgentBaseUrl"] ?? string.Empty,
+
+            // Paced evenly by default: a sixtieth of the minute budget per
+            // second never spends the minute window early. With the SDK's
+            // 60/s, 500 requests went out in about eight seconds and nothing
+            // was sent for the rest of the minute.
+            MaxTransportRequestsPerSecond = Math.Clamp(
+                configuration.GetValue("Mezon:RateLimit:RequestsPerSecond", Math.Max(1, perMinute / 60)),
+                1,
+                1000),
+            MaxTransportRequestsPerMinute = perMinute,
+            MaxConnectRequestsPerSecond = Math.Clamp(
+                configuration.GetValue("Mezon:RateLimit:ConnectRequestsPerSecond", 2),
+                1,
+                100),
+            SocketHandlerTimeoutInMilliseconds = null,
+            DefaultRatelimitCallback = MonzeMetrics.RecordUpstreamRateLimit
+        };
+        customization?.Configure(options);
+        return options;
+    }
+
+    /// <summary>
+    /// The pace of bulk outbox delivery: at most
+    /// Monze:Outbox:TransportSharePercent (default 50) of the transport's
+    /// minute budget, so command replies, buttons and welcome messages keep
+    /// the rest while a backlog drains. It banks about two seconds of sends.
+    /// </summary>
+    internal static UpstreamPacer CreateOutboxPacer(IConfiguration configuration, MezonClientOptions options, TimeProvider time)
+    {
+        var share = Math.Clamp(configuration.GetValue("Monze:Outbox:TransportSharePercent", 50), 1, 100);
+        var perMinute = options.MaxTransportRequestsPerMinute * share / 100.0;
+        return new UpstreamPacer(perMinute, Math.Clamp((int)(perMinute / 30), 1, 64), time);
     }
 
     private static TransportType ResolveTransportType(string? configured)
@@ -330,6 +403,7 @@ public sealed partial class MonzeBot : BackgroundService
         }
 
         _clanJoinGate.Dispose();
+        _handlerStop.Dispose();
         base.Dispose();
     }
 }

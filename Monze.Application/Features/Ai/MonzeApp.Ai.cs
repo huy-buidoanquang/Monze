@@ -93,9 +93,27 @@ public sealed partial class MonzeApp
             return Say(MonzeMessages.AiBudgetExceeded);
         }
 
-        var gap = await _messageHistory.ChannelHasGapAsync(clanId, channelId, cancellationToken);
         var instruction = MonzeAiInstructions.For(module);
-        var generated = await ai.CompleteAsync(instruction, input, cancellationToken);
+        string? generated;
+        bool gap;
+        try
+        {
+            gap = await _messageHistory.ChannelHasGapAsync(clanId, channelId, cancellationToken);
+            generated = await ai.CompleteAsync(instruction, input, cancellationToken);
+        }
+        catch
+        {
+            await _aiUsage.RefundAiAsync(clanId, userId, estimatedTokens, CancellationToken.None);
+            throw;
+        }
+
+        if (generated is null)
+        {
+            // Nothing was answered (error status, timeout, empty or malformed
+            // body): the request does not count against the budget (CAND-05).
+            await _aiUsage.RefundAiAsync(clanId, userId, estimatedTokens, cancellationToken);
+        }
+
         var body = LimitAiOutput(generated ?? MonzeMessages.AiProviderEmpty);
         var note = MessageGap.CoverageNote(gap && module == MonzeCommandNames.AiSummary);
         var fields = new List<CommandField>(string.IsNullOrEmpty(note) ? 1 : 2)

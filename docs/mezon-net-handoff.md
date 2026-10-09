@@ -34,16 +34,18 @@ remain separate gates.
 
 ## SDK 1.6.2 interaction actor boundary
 
-Current source inspection supersedes the older 1.6.0 note. In the reviewed backend,
-both button and dropdown handlers replace the client-supplied user ID with the
-authenticated request-context user. The reviewed SDK source used for 1.6.2 marks
-routed button and dropdown actors as `InteractionActorTrust.ServerAuthenticated`.
-Monze additionally binds private interaction messages to the initiating user before
-running a handler.
+The earlier review here was wrong for buttons. In mezon-api `bcc6e172`,
+`MessageButtonClick` forwards the client's `user_id` unchanged; only
+`DropdownBoxSelected` replaces it with the authenticated request-context user
+(`server/api_interactive_message.go:10-45`). SDK 1.6.2 nevertheless marks routed
+button actors as `InteractionActorTrust.ServerAuthenticated`; Mezon.Net `v1.7.0`
+(commit `6f267e7`) marks them client-supplied. Monze accepts a private click only
+on the exact ephemeral message it sent to that user. The remaining server fix and
+release conditions are in `docs/campaign-upstream-handoff.md` (CAND-19).
 
-This establishes the reviewed source contract; it is not a substitute for a final
-browser replay. Any future backend or SDK change to actor provenance must retain a
-test that a forged `user_id` is replaced before the Monze handler is invoked.
+Any future backend or SDK change to actor provenance must retain a test that a
+forged `user_id` is replaced before the Monze handler is invoked
+(`tests/Monze.Tests.E2E/Areas/ForgedActorTests.cs`).
 
 Monze measures only the callback-to-enqueue segment. SDK allocations and the complete
 browser to backend to socket path must still be measured separately against the

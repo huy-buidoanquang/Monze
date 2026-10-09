@@ -113,6 +113,15 @@ internal static class WelcomeMessageRenderer
                 break;
             }
 
+            // A stray "{" before a token: the token opens at the last "{" before
+            // its "}", and the stray text stays verbatim (CAND-13).
+            var inner = template.LastIndexOf('{', close - 1);
+            if (inner > open)
+            {
+                result.Append(template, open, inner - open);
+                open = inner;
+            }
+
             var token = template[(open + 1)..close];
             if (!TryResolveToken(
                     token,

@@ -31,10 +31,16 @@ public interface ISchedulingRepository
 
     Task<IReadOnlyList<DueMeetingSchedule>> ClaimDueMeetingSchedulesAsync(CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Ends a claim: active again at <paramref name="nextRunAt"/> (or completed
+    /// when it is null and not <paramref name="failed"/>). The schedule's
+    /// last_error becomes <paramref name="errorCode"/> (null clears it).
+    /// </summary>
     Task CompleteMeetingScheduleAsync(
         long id,
         string leaseToken,
         DateTimeOffset? nextRunAt,
         bool failed,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        string? errorCode = null);
 }

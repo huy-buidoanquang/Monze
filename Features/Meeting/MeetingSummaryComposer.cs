@@ -4,9 +4,10 @@ using Monze.Ui;
 
 namespace Monze;
 
-public sealed class MeetingSummaryComposer(IUserProfileRepository userProfiles)
+public sealed class MeetingSummaryComposer(IUserProfileRepository userProfiles, TimeProvider? timeProvider = null)
 {
     private static readonly TimeZoneInfo VietnamTimeZone = ResolveVietnamTimeZone();
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
 
     public async Task<MeetingSummaryDelivery?> ComposeAsync(
         AgentSummaryResult result,
@@ -15,7 +16,7 @@ public sealed class MeetingSummaryComposer(IUserProfileRepository userProfiles)
     {
         var identities = CollectIdentities(result);
         var labels = await ResolveLabelsAsync(context.ClanId, identities, cancellationToken);
-        var presentation = BuildPresentation(result, context, labels);
+        var presentation = BuildPresentation(result, context, labels, _time.GetUtcNow());
         var replyToMessageId = context.NotificationChannelId == context.TextChannelId
             ? context.SourceMessageId ?? context.NotificationMessageId
             : null;
@@ -83,13 +84,14 @@ public sealed class MeetingSummaryComposer(IUserProfileRepository userProfiles)
     private static MeetingSummaryPresentation BuildPresentation(
         AgentSummaryResult result,
         MeetingSummaryContext context,
-        IReadOnlyDictionary<string, string> labels)
+        IReadOnlyDictionary<string, string> labels,
+        DateTimeOffset now)
     {
         var start = result.CreatedAt ?? context.StartedAt;
         var end = result.FinalizedAt ?? context.EndedAt;
         if (start is null)
         {
-            start = end ?? DateTimeOffset.UtcNow;
+            start = end ?? now;
         }
 
         if (end is null || end < start)

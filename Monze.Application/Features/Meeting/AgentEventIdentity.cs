@@ -33,8 +33,9 @@ public static class AgentEventIdentity
         {
             using var document = JsonDocument.Parse(rawResponse);
             var root = document.RootElement;
-            if (root.TryGetProperty("event_id", out var property)
-                || root.TryGetProperty("eventId", out property))
+            if (root.ValueKind == JsonValueKind.Object
+                && (root.TryGetProperty("event_id", out var property)
+                    || root.TryGetProperty("eventId", out property)))
             {
                 if (property.ValueKind == JsonValueKind.String)
                 {

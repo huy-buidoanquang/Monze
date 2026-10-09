@@ -15,6 +15,7 @@ public sealed partial class MonzeBot
     private Task HandleMonzeAsync(ICommandContext context)
         => ExecuteCommandOnceAsync(
             context,
+            ResolveMonzeCommand(context),
             () => HandleMonzeCoreAsync(
                 context,
                 new CommandArguments(context.Args),
@@ -23,6 +24,7 @@ public sealed partial class MonzeBot
     private Task HandleDirectMonzeAsync(ICommandContext context, string module)
         => ExecuteCommandOnceAsync(
             context,
+            module,
             () => HandleMonzeCoreAsync(
                 context,
                 new CommandArguments(module, context.Args),
@@ -31,6 +33,7 @@ public sealed partial class MonzeBot
     private Task HandleDirectHelpAsync(ICommandContext context)
         => ExecuteCommandOnceAsync(
             context,
+            MonzeCommandNames.Help,
             () => HandleMonzeCoreAsync(
                 context,
                 new CommandArguments(MonzeCommandNames.Help, context.Args),
@@ -79,7 +82,6 @@ public sealed partial class MonzeBot
                 clanId,
                 context.Author.Id,
                 commandKey,
-                DateTimeOffset.UtcNow,
                 out var retryAfter))
         {
             var rateLimitResponse = MonzeMessageBuilder.Card(
@@ -137,13 +139,32 @@ public sealed partial class MonzeBot
                     _welcomeSetupDrafts.Set(
                         new WelcomeSetupDraftKey(clanId, context.Channel.Id, context.Author.Id),
                         settings,
-                        DateTimeOffset.UtcNow);
+                        _time.GetUtcNow());
                 }
                 await ReplyCommandAsync(context, MonzeMessageBuilder.Card(outcome, _commandOptions));
             }
         }
         catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
         {
+            if (aiLoadingMessageId > 0)
+            {
+                // Stopped mid-request: replace the loading card instead of leaving it behind (WF-06).
+                // The command is then recorded as uncertain (ExecuteCommandOnceCoreAsync).
+                try
+                {
+                    await UpdateCommandAsync(
+                        context,
+                        aiLoadingMessageId,
+                        MonzeMessageBuilder.Card(MonzeMessages.TitleMonze, MonzeMessages.TemporaryFailure, MonzeTone.Error))
+                        .WaitAsync(_timings.UncertainMarkTimeout, _time);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "The AI loading card could not be closed while stopping. LoadingMessage={LoadingMessageId}.", aiLoadingMessageId);
+                }
+            }
+
+            throw;
         }
         catch (Exception ex)
         {
@@ -215,7 +236,7 @@ public sealed partial class MonzeBot
             return null;
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _time.GetUtcNow();
         var cutoff = now.AddHours(-1);
         var history = new List<(long Id, long? CreatedAt, string Text)>(32);
         long? anchorCreatedAt = null;
@@ -241,7 +262,14 @@ public sealed partial class MonzeBot
                 }
 
                 var content = MessageContent.Parse(message.Content);
-                if (string.IsNullOrWhiteSpace(content.Text))
+                if (string.IsNullOrWhiteSpace(content.Text)
+                    || !AiReplyWindow.IsConversationMessage(
+                        message.MessageId,
+                        anchorId,
+                        message.SenderId,
+                        context.Client.BotId,
+                        content.Text!,
+                        _commandOptions.Prefix))
                 {
                     continue;
                 }

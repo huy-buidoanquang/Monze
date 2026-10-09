@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Monze.Domain;
 
 public static class LocalSchedule
@@ -40,5 +42,27 @@ public static class LocalSchedule
 
         utc = TimeZoneInfo.ConvertTimeToUtc(local, zone);
         return true;
+    }
+
+    /// <summary>
+    /// The instant as dd/MM/yyyy HH:mm in the zone, formatted with the
+    /// invariant culture: the host's culture would change the separator (tr-TR)
+    /// or the calendar (ar-SA Hijri) (CAND-10).
+    /// </summary>
+    public static string Describe(DateTimeOffset instant, string timeZoneId)
+    {
+        try
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+            return string.Create(CultureInfo.InvariantCulture, $"{TimeZoneInfo.ConvertTime(instant, zone):dd/MM/yyyy HH:mm} ({timeZoneId})");
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return string.Create(CultureInfo.InvariantCulture, $"{instant.ToUniversalTime():dd/MM/yyyy HH:mm} UTC");
+        }
+        catch (InvalidTimeZoneException)
+        {
+            return string.Create(CultureInfo.InvariantCulture, $"{instant.ToUniversalTime():dd/MM/yyyy HH:mm} UTC");
+        }
     }
 }

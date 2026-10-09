@@ -74,7 +74,9 @@ public sealed class OpenAiCompatibleProvider : IAiProvider
             }
 
             using var document = JsonDocument.Parse(responseText);
-            if (!document.RootElement.TryGetProperty("choices", out var choices) ||
+            // A root or choice of another JSON kind is a malformed answer, not an exception (CAND-14).
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("choices", out var choices) ||
                 choices.ValueKind != JsonValueKind.Array ||
                 choices.GetArrayLength() == 0)
             {
@@ -84,7 +86,7 @@ public sealed class OpenAiCompatibleProvider : IAiProvider
                 return null;
             }
 
-            var message = choices[0].TryGetProperty("message", out var messageElement)
+            var message = choices[0].ValueKind == JsonValueKind.Object && choices[0].TryGetProperty("message", out var messageElement)
                 ? messageElement
                 : default;
             var result = message.ValueKind == JsonValueKind.Object &&

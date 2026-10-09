@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using Monze.Application;
 
 namespace Monze.Infrastructure.Caching;
@@ -11,18 +10,23 @@ internal sealed class MonzeL1Cache : IDisposable
     private static readonly TimeSpan MaintenanceInterval = TimeSpan.FromSeconds(30);
     private readonly ConcurrentDictionary<MonzeCacheKey, Entry> _entries = new();
     private readonly ConcurrentQueue<EvictionToken> _evictionQueue = new();
-    private readonly Timer _maintenanceTimer;
+    private readonly TimeProvider _time;
+    private readonly ITimer _maintenanceTimer;
     private long _usedBytes;
     private long _nextToken;
 
-    public MonzeL1Cache()
+    public MonzeL1Cache(TimeProvider? timeProvider = null)
     {
-        _maintenanceTimer = new Timer(
+        _time = timeProvider ?? TimeProvider.System;
+        _maintenanceTimer = _time.CreateTimer(
             static state => ((MonzeL1Cache)state!).RemoveExpiredEntries(),
             this,
             MaintenanceInterval,
             MaintenanceInterval);
     }
+
+    /// <summary>Eviction tokens waiting in the queue (tests).</summary>
+    internal int QueuedTokens => _evictionQueue.Count;
 
     public bool TryGet(MonzeCacheKey key, out ReadModelCacheEntry entry)
     {
@@ -32,7 +36,7 @@ internal sealed class MonzeL1Cache : IDisposable
             return false;
         }
 
-        if (cached.ExpiresAt <= Stopwatch.GetTimestamp())
+        if (cached.ExpiresAt <= _time.GetTimestamp())
         {
             Remove(key, cached);
             entry = default;
@@ -54,7 +58,7 @@ internal sealed class MonzeL1Cache : IDisposable
             return;
         }
 
-        var expiresAt = Stopwatch.GetTimestamp() + ToStopwatchTicks(ttl);
+        var expiresAt = _time.GetTimestamp() + ToTimestampTicks(ttl);
         var replacement = new Entry(
             value,
             expiresAt,
@@ -106,15 +110,15 @@ internal sealed class MonzeL1Cache : IDisposable
         Interlocked.Exchange(ref _usedBytes, 0);
     }
 
-    private static long ToStopwatchTicks(TimeSpan duration)
+    private long ToTimestampTicks(TimeSpan duration)
     {
-        var ticks = duration.TotalSeconds * Stopwatch.Frequency;
+        var ticks = duration.TotalSeconds * _time.TimestampFrequency;
         return Math.Max(1, (long)Math.Min(ticks, long.MaxValue));
     }
 
     private void RemoveExpiredEntries()
     {
-        var now = Stopwatch.GetTimestamp();
+        var now = _time.GetTimestamp();
         foreach (var pair in _entries)
         {
             if (pair.Value.ExpiresAt <= now)
@@ -123,7 +127,25 @@ internal sealed class MonzeL1Cache : IDisposable
             }
         }
 
+        CompactEvictionQueue();
         TrimToLimit();
+    }
+
+    /// <summary>
+    /// Drops the tokens of entries that expired, were removed or were replaced
+    /// after they were queued. Every write queues a token and TrimToLimit only
+    /// dequeues while the cache is over its byte limit, so a cache that stays
+    /// under it would otherwise keep every token it ever queued (CAND-30).
+    /// </summary>
+    private void CompactEvictionQueue()
+    {
+        for (var pending = _evictionQueue.Count; pending > 0 && _evictionQueue.TryDequeue(out var token); pending--)
+        {
+            if (_entries.TryGetValue(token.Key, out var current) && current.Token == token.Token)
+            {
+                _evictionQueue.Enqueue(token);
+            }
+        }
     }
 
     private void TrimToLimit()

@@ -10,6 +10,40 @@ public sealed partial class MonzeBot
 {
     private async Task ExecuteCommandOnceAsync(
         ICommandContext context,
+        string module,
+        Func<Task> handler)
+    {
+        var startedAt = _time.GetTimestamp();
+        if (Interlocked.Increment(ref _commandsInFlight) > _maxCommandsInFlight)
+        {
+            // Overloaded (the SDK starts a handler per message without a bound):
+            // drop the command unanswered rather than queue it behind the
+            // upstream budget, so the bot recovers as soon as the burst ends.
+            Interlocked.Decrement(ref _commandsInFlight);
+            _logger.LogDebug("Command shed: {InFlight} commands already in flight.", _maxCommandsInFlight);
+            MonzeMetrics.RecordCommand(MonzeCommandMetricTags.Module(module), MonzeCommandMetricTags.Shed, _time.GetElapsedTime(startedAt));
+            return;
+        }
+
+        var outcome = MonzeCommandMetricTags.Failed;
+        MonzeMetrics.CommandInflight.Add(1);
+        try
+        {
+            outcome = await ExecuteCommandOnceCoreAsync(context, handler);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _commandsInFlight);
+            MonzeMetrics.CommandInflight.Add(-1);
+            MonzeMetrics.RecordCommand(
+                MonzeCommandMetricTags.Module(module),
+                outcome,
+                _time.GetElapsedTime(startedAt));
+        }
+    }
+
+    private async Task<string> ExecuteCommandOnceCoreAsync(
+        ICommandContext context,
         Func<Task> handler)
     {
         var clanId = context.Clan?.Id ?? 0;
@@ -18,7 +52,7 @@ public sealed partial class MonzeBot
         if (clanId <= 0 || channelId <= 0 || messageId <= 0)
         {
             await handler();
-            return;
+            return MonzeCommandMetricTags.Completed;
         }
 
         CommandInboxLease? lease;
@@ -32,7 +66,7 @@ public sealed partial class MonzeBot
         }
         catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
         {
-            return;
+            return MonzeCommandMetricTags.Cancelled;
         }
         catch (Exception ex)
         {
@@ -45,12 +79,12 @@ public sealed partial class MonzeBot
                 MonzeMessages.TitleMonze,
                 MonzeMessages.TemporaryFailure,
                 MonzeTone.Error));
-            return;
+            return MonzeCommandMetricTags.ClaimFailed;
         }
 
         if (lease is null)
         {
-            return;
+            return MonzeCommandMetricTags.Duplicate;
         }
 
         try
@@ -60,7 +94,7 @@ public sealed partial class MonzeBot
         catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
         {
             await MarkCommandUncertainAsync(lease.Value);
-            return;
+            return MonzeCommandMetricTags.Cancelled;
         }
         catch
         {
@@ -70,7 +104,10 @@ public sealed partial class MonzeBot
 
         try
         {
-            if (!await _commandInbox.CompleteAsync(lease.Value, context.CancellationToken))
+            // Not the command's token: an answered command whose completion is dropped
+            // while stopping stays 'processing' and a redelivery answers it again (WF-08).
+            using var timeout = NewOutcomeTimeout();
+            if (!await _commandInbox.CompleteAsync(lease.Value, timeout.Token))
             {
                 _logger.LogError(
                     "Command inbox lease was lost before completion. Clan={ClanId}, Channel={ChannelId}, Message={MessageId}.",
@@ -78,6 +115,7 @@ public sealed partial class MonzeBot
                     lease.Value.ChannelId,
                     lease.Value.MessageId);
                 await MarkCommandUncertainAsync(lease.Value);
+                return MonzeCommandMetricTags.Uncertain;
             }
         }
         catch (Exception ex)
@@ -89,13 +127,16 @@ public sealed partial class MonzeBot
                 lease.Value.ChannelId,
                 lease.Value.MessageId);
             await MarkCommandUncertainAsync(lease.Value);
+            return MonzeCommandMetricTags.Uncertain;
         }
+
+        return MonzeCommandMetricTags.Completed;
     }
 
     private async Task MarkCommandUncertainAsync(CommandInboxLease lease)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_runtimeToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        // Not on the stopping token: stopping is when this matters (WF-08).
+        using var timeout = NewOutcomeTimeout();
         try
         {
             if (!await _commandInbox.MarkUncertainAsync(lease, timeout.Token))
@@ -105,7 +146,7 @@ public sealed partial class MonzeBot
                     lease.MessageId);
             }
         }
-        catch (Exception ex) when (!timeout.IsCancellationRequested || !_runtimeToken.IsCancellationRequested)
+        catch (Exception ex)
         {
             _logger.LogError(
                 ex,

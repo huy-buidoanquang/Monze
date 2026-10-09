@@ -63,37 +63,7 @@ public sealed partial class MonzeBot
 
             if (kind == AgentEventKind.SummaryDone)
             {
-                var summary = await _transcript.FetchSummaryAsync(roomId, cancellationToken);
-                _logger.LogInformation(
-                    "Agent summary completion processed. HasSummary={HasSummary}.",
-                    summary is not null);
-                if (summary is null || string.IsNullOrWhiteSpace(summary.Summary))
-                {
-                    await _meeting.MarkSummaryPendingAsync(roomId, cancellationToken);
-                    await _meeting.ReleaseInboxAsync("agent", eventKey, cancellationToken);
-                }
-                else
-                {
-                    var summaryContext = await _meeting.GetSummaryContextAsync(roomId, cancellationToken);
-                    var delivery = summaryContext is null
-                        ? null
-                        : await _summaryComposer.ComposeAsync(summary, summaryContext, cancellationToken);
-                    var stored = await _meeting.StoreSummaryAsync(
-                        roomId,
-                        summary.Summary,
-                        summary.FullTranscriptJson,
-                        delivery,
-                        cancellationToken);
-                    if (!stored)
-                    {
-                        _logger.LogWarning(
-                            "Agent summary could not be matched to a meeting session. RoomId={RoomId}.",
-                            roomId);
-                        await _meeting.MarkSummaryPendingAsync(roomId, cancellationToken);
-                        await _meeting.ReleaseInboxAsync("agent", eventKey, cancellationToken);
-                    }
-                }
-
+                await QueueSummaryFetchAsync(roomId, eventKey, cancellationToken);
                 return;
             }
 
@@ -202,7 +172,8 @@ public sealed partial class MonzeBot
                 }
 
                 await Task.Delay(
-                    TimeSpan.FromMilliseconds(250 * (attempt + 1)),
+                    _timings.AgentScopeRetryBase * (attempt + 1),
+                    _time,
                     cancellationToken);
             }
         }

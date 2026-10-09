@@ -1,0 +1,10 @@
+{
+  "schema": "monze.coverage-thresholds.v1",
+  "note": "Percent. line/branch are floors: the coverage of the full campaign 20261008-2034-full-soak rounded down; raise them as coverage grows and never lower them. targetLine/targetBranch are the goals of the campaign plan. The report applies the floors only when the unit, property, integration and e2e tiers all ran.",
+  "assemblies": {
+    "Monze": { "line": 79.0, "branch": 73.0, "targetLine": 90.0, "targetBranch": 80.0 },
+    "Monze.Application": { "line": 93.0, "branch": 90.0, "targetLine": 97.0, "targetBranch": 92.0 },
+    "Monze.Domain": { "line": 95.5, "branch": 75.0, "targetLine": 100.0, "targetBranch": 98.0 },
+    "Monze.Infrastructure": { "line": 96.5, "branch": 75.0, "targetLine": 93.0, "targetBranch": 85.0 }
+  }
+}

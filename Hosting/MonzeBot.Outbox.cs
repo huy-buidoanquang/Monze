@@ -1,6 +1,4 @@
-using System.Net;
-using System.Net.Http;
-using System.Net.Sockets;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Mezon.Net.Sdk;
 using Microsoft.Extensions.Configuration;
@@ -13,21 +11,127 @@ namespace Monze;
 
 public sealed partial class MonzeBot
 {
+    /// <summary>A claimed row gets a send slot within this time, well inside its 60 s lease.</summary>
+    private static readonly TimeSpan OutboxClaimHorizon = TimeSpan.FromSeconds(20);
+
+    /// <summary>How often the 60 s leases of rows still being delivered are extended.</summary>
+    private static readonly TimeSpan OutboxLeaseRenewal = TimeSpan.FromSeconds(20);
+
+    /// <summary>Writes of a delivery's outcome, 1, 2, 4 and 8 s apart (TryCompleteOutboxAsync).</summary>
+    private const int OutboxCompletionAttempts = 5;
+
+    /// <summary>
+    /// Delivers due outbox rows as a pipeline: up to Monze:Outbox:MaxConcurrency
+    /// deliveries run at once, and once half of them have finished the free
+    /// slots are refilled (a batch no longer waits for its slowest send). Only
+    /// rows that get a send slot from <paramref name="pacer"/> within
+    /// <see cref="OutboxClaimHorizon"/> are claimed, and the leases of rows
+    /// still being delivered (a send can also wait for the SDK's transport
+    /// budget, which commands share) are renewed while this process lives, so
+    /// only a crashed delivery is ever reconciled.
+    /// </summary>
     private async Task RunOutboxWorkerAsync(
         MezonClient client,
+        UpstreamPacer pacer,
         CancellationToken cancellationToken)
     {
-        var pollMilliseconds = Math.Clamp(
-            _configuration.GetValue("Monze:Outbox:PollMilliseconds", 250),
-            100,
-            5_000);
+        var maxConcurrency = Math.Clamp(
+            _configuration.GetValue("Monze:Outbox:MaxConcurrency", 32),
+            1,
+            128);
+        var refill = Math.Max(1, maxConcurrency / 2);
+        var deliveries = new List<Task>(maxConcurrency);
+        var leases = new ConcurrentDictionary<long, string>();
+        using var renewalStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var renewal = RenewOutboxLeasesAsync(leases, renewalStop.Token);
+        Task? poll = null;
+        var nextReconcile = _time.GetTimestamp();
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var moreDue = false;
+            try
+            {
+                deliveries.RemoveAll(task => task.IsCompleted && ObserveOutboxDelivery(task));
+                var free = maxConcurrency - deliveries.Count;
+                var limit = Math.Min(free, pacer.Available(OutboxClaimHorizon));
+                if (free >= refill && limit > 0)
+                {
+                    var items = await _outbox.ClaimDueOutboxAsync(cancellationToken, limit: limit);
+                    MonzeMetrics.OutboxClaimed.Add(items.Count);
+                    foreach (var item in items)
+                    {
+                        deliveries.Add(DeliverOutboxAsync(client, pacer, item, leases, cancellationToken));
+                    }
 
+                    moreDue = items.Count == limit;
+                }
+
+                if (_time.GetElapsedTime(nextReconcile) >= TimeSpan.Zero)
+                {
+                    nextReconcile = _time.GetTimestamp() + (long)(_timings.OutboxReconcileInterval.TotalSeconds * _time.TimestampFrequency);
+                    await ReconcileUncertainOutboxAsync(client, cancellationToken);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Outbox worker iteration failed; retrying.");
+            }
+
+            if (moreDue && maxConcurrency - deliveries.Count >= refill)
+            {
+                continue;
+            }
+
+            try
+            {
+                // Wake on the poll interval or as soon as a delivery finishes.
+                poll ??= Task.Delay(_timings.OutboxPollInterval, _time, cancellationToken);
+                await (deliveries.Count == 0 ? poll : Task.WhenAny(deliveries.Append(poll)));
+                if (poll.IsCompleted)
+                {
+                    await poll;
+                    poll = null;
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+
+        foreach (var delivery in deliveries)
+        {
+            try
+            {
+                await delivery;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Outbox delivery failed.");
+            }
+        }
+
+        await renewalStop.CancelAsync();
+        await renewal;
+    }
+
+    private async Task RenewOutboxLeasesAsync(ConcurrentDictionary<long, string> leases, CancellationToken cancellationToken)
+    {
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                while (await FlushOutboxBatchAsync(client, cancellationToken))
+                await Task.Delay(OutboxLeaseRenewal, _time, cancellationToken);
+                if (!leases.IsEmpty)
                 {
+                    await _outbox.RenewOutboxLeasesAsync(new Dictionary<long, string>(leases), cancellationToken);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -36,48 +140,63 @@ public sealed partial class MonzeBot
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Outbox worker iteration failed; retrying.");
+                _logger.LogWarning(ex, "Outbox lease renewal failed; retrying.");
             }
-
-            await Task.Delay(pollMilliseconds, cancellationToken);
         }
     }
 
-    private async Task<bool> FlushOutboxBatchAsync(
-        MezonClient client,
-        CancellationToken cancellationToken)
+    private bool ObserveOutboxDelivery(Task delivery)
     {
-        var items = await _outbox.ClaimDueOutboxAsync(cancellationToken);
-        if (items.Count == 0)
+        if (delivery.Exception is { } exception)
         {
-            return false;
+            _logger.LogWarning(exception.GetBaseException(), "Outbox delivery failed.");
         }
 
-        MonzeMetrics.OutboxClaimed.Add(items.Count);
-
-        var maxConcurrency = Math.Clamp(
-            _configuration.GetValue("Monze:Outbox:MaxConcurrency", 32),
-            1,
-            128);
-        await Parallel.ForEachAsync(
-            items,
-            new ParallelOptions
-            {
-                MaxDegreeOfParallelism = maxConcurrency,
-                CancellationToken = cancellationToken
-            },
-            async (item, ct) => await DeliverOutboxAsync(client, item, ct));
         return true;
     }
 
-    private async ValueTask DeliverOutboxAsync(
+    private async Task DeliverOutboxAsync(
+        MezonClient client,
+        UpstreamPacer pacer,
+        DueOutbox item,
+        ConcurrentDictionary<long, string> leases,
+        CancellationToken cancellationToken)
+    {
+        leases[item.Id] = item.LeaseToken;
+        try
+        {
+            // The slot is reserved before the first await, so the next claim sees it.
+            var wait = pacer.Reserve();
+            if (wait > TimeSpan.Zero)
+            {
+                try
+                {
+                    await Task.Delay(wait, _time, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    // Stopping before the send: hand the row back now instead of after its lease.
+                    await TryCompleteOutboxAsync(item.Id, item.LeaseToken, null, false, "delivery-not-sent", countsAsAttempt: false);
+                    throw;
+                }
+            }
+
+            await DeliverOutboxAsync(client, item, cancellationToken);
+        }
+        finally
+        {
+            leases.TryRemove(item.Id, out _);
+        }
+    }
+
+    private async Task DeliverOutboxAsync(
         MezonClient client,
         DueOutbox item,
         CancellationToken cancellationToken)
     {
         var startedAt = Stopwatch.GetTimestamp();
         Interlocked.Increment(ref _outboxInFlight);
-        var dueLag = DateTimeOffset.UtcNow - item.DueAt;
+        var dueLag = _time.GetUtcNow() - item.DueAt;
         if (dueLag >= TimeSpan.Zero)
         {
             MonzeMetrics.OutboxDueLagMilliseconds.Record(dueLag.TotalMilliseconds);
@@ -108,7 +227,6 @@ public sealed partial class MonzeBot
                 item.LeaseToken,
                 null,
                 true,
-                cancellationToken,
                 "invalid-kind");
             return;
         }
@@ -129,7 +247,6 @@ public sealed partial class MonzeBot
                 item.LeaseToken,
                 item.ExternalMessageId,
                 action == OutboxAction.HoldForAdmin,
-                cancellationToken,
                 action == OutboxAction.HoldForAdmin ? "retry-limit" : null);
             return;
         }
@@ -137,15 +254,7 @@ public sealed partial class MonzeBot
         try
         {
             var channel = await client.GetChannelAsync(item.ChannelId, cancellationToken);
-            var content = string.IsNullOrWhiteSpace(item.ContentJson)
-                ? item.Kind.Equals("MeetingSummary", StringComparison.OrdinalIgnoreCase)
-                    ? MonzeMessageBuilder.MeetingSummary(item.Body, item.ReplyToMessageId)
-                    : MonzeMessageBuilder.Card(item.Kind, item.Body, MonzeTone.Info)
-                : Mezon.Net.Client.MessageContent.Parse(item.ContentJson);
-            if (item.ReplyToMessageId is long replyToMessageId)
-            {
-                content = MessageContentReply.Apply(content, replyToMessageId);
-            }
+            var content = BuildOutboxContent(item);
             var references = MeetingReplyReference.Create(
                 item,
                 client.BotId,
@@ -164,7 +273,6 @@ public sealed partial class MonzeBot
                     item.LeaseToken,
                     null,
                     true,
-                    cancellationToken,
                     "delivery-uncertain");
                 return;
             }
@@ -174,68 +282,116 @@ public sealed partial class MonzeBot
                 item.LeaseToken,
                 ackMessageId,
                 false,
-                cancellationToken,
                 null);
             MonzeMetrics.OutboxDelivered.Add(1);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Stopping while the send may be on the wire: reconcile it rather than resend it.
+            await TryCompleteOutboxAsync(item.Id, item.LeaseToken, null, true, "delivery-uncertain");
+            throw;
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning(ex, "Outbox {OutboxId} did not get an ack", item.Id);
-            var uncertain = IsUncertainDeliveryFailure(ex);
-            if (uncertain)
+            var failure = OutboxDeliveryFailure.Classify(ex);
+            if (failure == OutboxFailureKind.Uncertain)
             {
+                // The message may be on the channel: reconcile, never resend blindly.
                 MonzeMetrics.OutboxUncertain.Add(1);
+                await TryCompleteOutboxAsync(item.Id, item.LeaseToken, null, true, "delivery-uncertain");
+                return;
             }
-            else
+
+            MonzeMetrics.OutboxFailed.Add(1);
+            if (failure == OutboxFailureKind.NotSent)
             {
-                MonzeMetrics.OutboxFailed.Add(1);
+                // Nothing left the process (the socket is closed): retry until it is back.
+                await TryCompleteOutboxAsync(item.Id, item.LeaseToken, null, false, "delivery-not-sent", countsAsAttempt: false);
+                return;
             }
-            var hold = uncertain || OutboxPolicy.Decide(kind, false, item.Attempts)
-                == OutboxAction.HoldForAdmin;
+
+            var hold = failure == OutboxFailureKind.Rejected
+                || OutboxPolicy.Decide(kind, false, item.Attempts + 1) == OutboxAction.HoldForAdmin;
             await TryCompleteOutboxAsync(
                 item.Id,
                 item.LeaseToken,
                 null,
                 hold,
-                cancellationToken,
-                uncertain ? "delivery-uncertain" : "delivery-failed");
+                failure == OutboxFailureKind.Rejected ? "delivery-rejected" : hold ? "retry-limit" : "delivery-failed");
         }
     }
 
+    /// <summary>The content an outbox row is sent with; reconciliation compares against the same rendering.</summary>
+    private static Mezon.Net.Client.MessageContent BuildOutboxContent(DueOutbox item)
+    {
+        var content = string.IsNullOrWhiteSpace(item.ContentJson)
+            ? item.Kind.Equals("MeetingSummary", StringComparison.OrdinalIgnoreCase)
+                ? MonzeMessageBuilder.MeetingSummary(item.Body, item.ReplyToMessageId)
+                : MonzeMessageBuilder.Card(item.Kind, item.Body, MonzeTone.Info)
+            : Mezon.Net.Client.MessageContent.Parse(item.ContentJson);
+        return item.ReplyToMessageId is long replyToMessageId
+            ? MessageContentReply.Apply(content, replyToMessageId)
+            : content;
+    }
+
+    /// <summary>
+    /// Records how a delivery attempt ended on an <see cref="OutcomeTimeout"/>,
+    /// not on the worker's stopping token: an acked message whose completion
+    /// is dropped at shutdown would stay leased and be reconciled or resent
+    /// (WF-05), and a timeout while the bot runs would do the same whenever
+    /// the database is slow. A failed write is retried a few times while this
+    /// process still holds the row (the worker renews its lease), so a briefly
+    /// unreachable database does not leave an acked send to reconciliation,
+    /// which may no longer find it in the channel history (DEF-07).
+    /// </summary>
     private async Task TryCompleteOutboxAsync(
         long id,
         string leaseToken,
         long? externalMessageId,
         bool failed,
-        CancellationToken cancellationToken,
-        string? errorCode)
+        string? errorCode,
+        bool countsAsAttempt = true)
     {
-        try
+        using var timeout = NewOutcomeTimeout();
+        var delay = TimeSpan.FromSeconds(1);
+        for (var attempt = 1; ; attempt++)
         {
-            await _outbox.CompleteOutboxAsync(
-                id,
-                leaseToken,
-                externalMessageId,
-                failed,
-                cancellationToken,
-                errorCode);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            _logger.LogWarning("Outbox {OutboxId} completion timed out; lease will be reclaimed.", id);
-        }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            _logger.LogWarning(ex, "Outbox {OutboxId} completion failed; lease will be reclaimed.", id);
+            try
+            {
+                await _outbox.CompleteOutboxAsync(
+                    id,
+                    leaseToken,
+                    externalMessageId,
+                    failed,
+                    timeout.Token,
+                    errorCode,
+                    countsAsAttempt);
+                return;
+            }
+            catch (Exception ex) when (attempt < OutboxCompletionAttempts && !timeout.Token.IsCancellationRequested)
+            {
+                _logger.LogDebug(ex, "Outbox {OutboxId} completion failed; retrying.", id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Outbox {OutboxId} completion failed; the row is reconciled once its lease expires.", id);
+                return;
+            }
+
+            try
+            {
+                await Task.Delay(delay, _time, timeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("Outbox {OutboxId} completion was not recorded before the bot stopped; the row is reconciled once its lease expires.", id);
+                return;
+            }
+
+            delay *= 2;
         }
     }
-
-    private static bool IsUncertainDeliveryFailure(Exception exception)
-        => exception is TimeoutException
-            or TaskCanceledException
-            or HttpRequestException
-            or IOException
-            or System.Net.Sockets.SocketException;
 
 }
 

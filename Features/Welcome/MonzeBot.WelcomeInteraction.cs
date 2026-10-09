@@ -59,7 +59,7 @@ public sealed partial class MonzeBot
             context.CancellationToken)
             ?? new WelcomeSettings(false, null, 0);
         var key = GetWelcomeSetupDraftKey(context);
-        if (_welcomeSetupDrafts.TryGet(key, DateTimeOffset.UtcNow, out var draft))
+        if (_welcomeSetupDrafts.TryGet(key, _time.GetUtcNow(), out var draft))
         {
             if (draft.Version == current.Version)
             {
@@ -67,7 +67,7 @@ public sealed partial class MonzeBot
             }
         }
 
-        _welcomeSetupDrafts.Set(key, current, DateTimeOffset.UtcNow);
+        _welcomeSetupDrafts.Set(key, current, _time.GetUtcNow());
         await UpdatePrivateInteractionAsync(
             context,
             MonzeMessageBuilder.WelcomeSettings(current));
@@ -92,7 +92,7 @@ public sealed partial class MonzeBot
             context.CancellationToken)
             ?? new WelcomeSettings(false, null, 0);
         var key = GetWelcomeSetupDraftKey(context);
-        if (_welcomeSetupDrafts.TryGet(key, DateTimeOffset.UtcNow, out var savedDraft))
+        if (_welcomeSetupDrafts.TryGet(key, _time.GetUtcNow(), out var savedDraft))
         {
             if (savedDraft.Version != current.Version)
             {
@@ -111,7 +111,7 @@ public sealed partial class MonzeBot
         }
 
         current = current with { Enabled = enabled, Embed = draft };
-        _welcomeSetupDrafts.Set(key, current, DateTimeOffset.UtcNow);
+        _welcomeSetupDrafts.Set(key, current, _time.GetUtcNow());
         var content = MonzeMessageBuilder.WelcomeSettings(current, section);
         if (context.Message is not null)
         {
@@ -154,7 +154,7 @@ public sealed partial class MonzeBot
             current = new WelcomeSettings(false, null, 0);
         }
 
-        if (_welcomeSetupDrafts.TryGet(key, DateTimeOffset.UtcNow, out var savedDraft))
+        if (_welcomeSetupDrafts.TryGet(key, _time.GetUtcNow(), out var savedDraft))
         {
             if (savedDraft.Version != current.Version)
             {
@@ -169,7 +169,7 @@ public sealed partial class MonzeBot
             button.ExtraData,
             current.Enabled);
         current = current with { Enabled = enabled, Embed = draft };
-        _welcomeSetupDrafts.Set(key, current, DateTimeOffset.UtcNow);
+        _welcomeSetupDrafts.Set(key, current, _time.GetUtcNow());
         var outcome = await _app.PreviewWelcomeAsync(
             context.Channel.ClanId,
             context.Channel.Id,
@@ -257,7 +257,7 @@ public sealed partial class MonzeBot
             current = new WelcomeSettings(false, null, 0);
         }
 
-        if (_welcomeSetupDrafts.TryGet(key, DateTimeOffset.UtcNow, out var savedDraft))
+        if (_welcomeSetupDrafts.TryGet(key, _time.GetUtcNow(), out var savedDraft))
         {
             if (savedDraft.Version != current.Version)
             {
@@ -272,7 +272,7 @@ public sealed partial class MonzeBot
             current.Enabled);
         var draft = MonzeWelcomeFormParser.ReadEmbed(button.ExtraData, current);
         current = current with { Enabled = enabled, Embed = draft };
-        _welcomeSetupDrafts.Set(key, current, DateTimeOffset.UtcNow);
+        _welcomeSetupDrafts.Set(key, current, _time.GetUtcNow());
         var outcome = await _app.SaveWelcomeEmbedAsync(
             context.Channel.ClanId,
             context.User.Id,

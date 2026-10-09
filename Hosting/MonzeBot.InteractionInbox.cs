@@ -62,11 +62,15 @@ public sealed partial class MonzeBot
         }
     }
 
-    private async Task<bool> CompleteInteractionAsync(
-        InteractionInboxLease lease,
-        CancellationToken cancellationToken)
+    /// <summary>
+    /// Records a handled interaction on an <see cref="OutcomeTimeout"/>, not on
+    /// the handler token, so one handled while stopping is not handled again
+    /// after the restart (WF-08).
+    /// </summary>
+    private async Task<bool> CompleteInteractionAsync(InteractionInboxLease lease)
     {
-        if (await _interactionInbox.CompleteAsync(lease, cancellationToken))
+        using var timeout = NewOutcomeTimeout();
+        if (await _interactionInbox.CompleteAsync(lease, timeout.Token))
         {
             return true;
         }
@@ -100,8 +104,7 @@ public sealed partial class MonzeBot
 
     private async Task MarkInteractionUncertainAsync(InteractionInboxLease lease)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_runtimeToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        using var timeout = NewOutcomeTimeout();
         try
         {
             if (!await _interactionInbox.MarkUncertainAsync(lease, timeout.Token))
@@ -112,7 +115,7 @@ public sealed partial class MonzeBot
                     lease.Action);
             }
         }
-        catch (Exception ex) when (!timeout.IsCancellationRequested || !_runtimeToken.IsCancellationRequested)
+        catch (Exception ex)
         {
             _logger.LogError(
                 ex,

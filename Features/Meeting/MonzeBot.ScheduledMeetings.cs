@@ -15,6 +15,9 @@ namespace Monze;
 
 public sealed partial class MonzeBot
 {
+    /// <summary>meeting_schedule.last_error of an occurrence postponed because no voice room was free.</summary>
+    private const string ScheduleNoVoiceRoom = "no-voice-room";
+
     private async Task FlushScheduledMeetingsAsync(
         SdkMezonClient client,
         CancellationToken cancellationToken)
@@ -34,9 +37,17 @@ public sealed partial class MonzeBot
                     await _scheduling.CompleteMeetingScheduleAsync(
                         schedule.Id,
                         schedule.LeaseToken,
-                        DateTimeOffset.UtcNow.AddMinutes(5),
+                        _time.GetUtcNow().AddMinutes(5),
                         true,
-                        cancellationToken);
+                        cancellationToken,
+                        ScheduleNoVoiceRoom);
+
+                    // CAND-27: the requester hears once per occurrence, not on every 5-minute retry.
+                    if (schedule.LastError != ScheduleNoVoiceRoom)
+                    {
+                        await NotifySchedulePostponedAsync(client, schedule, cancellationToken);
+                    }
+
                     continue;
                 }
 
@@ -47,7 +58,7 @@ public sealed partial class MonzeBot
                             schedule.Kind,
                             schedule.WhenText,
                             schedule.TimeZoneId,
-                            DateTimeOffset.UtcNow.AddSeconds(1),
+                            _time.GetUtcNow().AddSeconds(1),
                             out var nextRun,
                             out _))
                     {
@@ -70,7 +81,7 @@ public sealed partial class MonzeBot
                 var committed = await _scheduledMeeting.CommitScheduledMeetingAsync(
                     schedule,
                     voice.VoiceChannelId,
-                    DateTimeOffset.UtcNow.AddMinutes(20),
+                    _time.GetUtcNow().AddMinutes(20),
                     next,
                     MonzeMessages.MeetingAgentInstruction,
                     MonzeMessageBuilder.MeetingInvitation(
@@ -84,7 +95,7 @@ public sealed partial class MonzeBot
                     await _scheduling.CompleteMeetingScheduleAsync(
                         schedule.Id,
                         schedule.LeaseToken,
-                        DateTimeOffset.UtcNow.AddMinutes(1),
+                        _time.GetUtcNow().AddMinutes(1),
                         true,
                         cancellationToken);
                 }
@@ -102,11 +113,29 @@ public sealed partial class MonzeBot
                 await _scheduling.CompleteMeetingScheduleAsync(
                     schedule.Id,
                     schedule.LeaseToken,
-                    DateTimeOffset.UtcNow.AddMinutes(1),
+                    _time.GetUtcNow().AddMinutes(1),
                     true,
                     cancellationToken);
             }
         }
     }
 
+    /// <summary>Tells the requester, privately in the schedule's channel, that the meeting waits for a free room (with its cancel button).</summary>
+    private async Task NotifySchedulePostponedAsync(
+        SdkMezonClient client,
+        DueMeetingSchedule schedule,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var channel = await client.GetChannelAsync(schedule.ChannelId, cancellationToken);
+            await channel.SendEphemeralAsync(
+                MonzeMessageBuilder.SchedulePostponed(schedule.Name, schedule.Id),
+                schedule.RequesterId);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "The requester of schedule {ScheduleId} could not be told it was postponed.", schedule.Id);
+        }
+    }
 }

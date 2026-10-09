@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="CsCheck" Version="4.9.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Monze.Domain\Monze.Domain.csproj" />
+    <ProjectReference Include="..\..\Monze.Application\Monze.Application.csproj" />
+    <ProjectReference Include="..\..\Monze.csproj" />
+    <ProjectReference Include="..\Monze.Testing\Monze.Testing.csproj" />
+  </ItemGroup>
+</Project>

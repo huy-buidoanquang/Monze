@@ -11,37 +11,40 @@ public sealed class MeetingMaintenanceWorker(
     IInteractionInboxRepository interactionInbox,
     ITranscriptClient transcript,
     MeetingSummaryComposer summaryComposer,
+    StartupReadiness readiness,
+    TimeProvider time,
+    MonzeWorkerTimings timings,
     ILogger<MeetingMaintenanceWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await StartupSchemaValidator.Ready.WaitAsync(stoppingToken);
-        var nextInboxPurge = DateTimeOffset.UtcNow;
+        await readiness.Ready.WaitAsync(stoppingToken);
+        var nextInboxPurge = time.GetUtcNow();
         var nextCommandInboxPurge = nextInboxPurge;
         var nextInteractionInboxPurge = nextInboxPurge;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                var now = DateTimeOffset.UtcNow;
+                var now = time.GetUtcNow();
                 await meeting.ExpireSuggestedAsync(now, stoppingToken);
                 await RetryPendingSummariesAsync(meeting, transcript, summaryComposer, logger, stoppingToken);
                 if (now >= nextInboxPurge)
                 {
-                    await meeting.PurgeInboxAsync(now.AddDays(-30), stoppingToken);
-                    nextInboxPurge = now.AddHours(1);
+                    await meeting.PurgeInboxAsync(now - timings.InboxRetention, stoppingToken);
+                    nextInboxPurge = now + timings.InboxPurgeInterval;
                 }
 
                 if (now >= nextCommandInboxPurge)
                 {
-                    await commandInbox.PurgeAsync(now.AddDays(-30), stoppingToken);
-                    nextCommandInboxPurge = now.AddHours(1);
+                    await commandInbox.PurgeAsync(now - timings.InboxRetention, stoppingToken);
+                    nextCommandInboxPurge = now + timings.InboxPurgeInterval;
                 }
 
                 if (now >= nextInteractionInboxPurge)
                 {
-                    await interactionInbox.PurgeAsync(now.AddDays(-30), stoppingToken);
-                    nextInteractionInboxPurge = now.AddHours(1);
+                    await interactionInbox.PurgeAsync(now - timings.InboxRetention, stoppingToken);
+                    nextInteractionInboxPurge = now + timings.InboxPurgeInterval;
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -53,7 +56,7 @@ public sealed class MeetingMaintenanceWorker(
                 logger.LogWarning(ex, "Meeting maintenance iteration failed; retrying.");
             }
 
-            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+            await Task.Delay(timings.MaintenanceInterval, time, stoppingToken);
         }
     }
 

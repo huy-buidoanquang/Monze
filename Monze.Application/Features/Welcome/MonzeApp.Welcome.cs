@@ -117,7 +117,7 @@ public sealed partial class MonzeApp
             channelId,
             enabled,
             normalized,
-            DateTimeOffset.UtcNow,
+            _time.GetUtcNow(),
             messageText,
             expectedVersion);
 
@@ -149,7 +149,7 @@ public sealed partial class MonzeApp
             Title: "Chào mừng",
             Description: settings.Text ?? MonzeMessages.DefaultWelcomeText);
         var ticket = _welcomeDrafts.Create(clanId, channelId, settings.Enabled,
-            draft, DateTimeOffset.UtcNow, settings.Text, settings.Version);
+            draft, _time.GetUtcNow(), settings.Text, settings.Version);
         return new CommandOutcome
         {
             Title = MonzeMessages.WelcomePreview,
@@ -171,7 +171,7 @@ public sealed partial class MonzeApp
                 token,
                 clanId,
                 channelId,
-                DateTimeOffset.UtcNow,
+                _time.GetUtcNow(),
                 out var ticket))
         {
             return Task.FromResult(Say(MonzeMessages.WelcomeDraftInvalid, tone: MonzeTone.Warn));
@@ -204,7 +204,7 @@ public sealed partial class MonzeApp
                 token,
                 clanId,
                 channelId,
-                DateTimeOffset.UtcNow,
+                _time.GetUtcNow(),
                 out var ticket))
         {
             return Say(MonzeMessages.WelcomeDraftInvalid, tone: MonzeTone.Warn);

@@ -18,6 +18,14 @@ public sealed class MonzeAiInstructionsTests
     }
 
     [Fact]
+    public void Summary_answers_with_the_summary_instead_of_describing_the_input()
+    {
+        var instruction = MonzeAiInstructions.For(MonzeCommandNames.AiSummary);
+
+        Assert.Contains("không mở đầu bằng việc mô tả INPUT", instruction, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Summary_uses_the_summary_module_name_for_gap_note()
     {
         Assert.Equal(MonzeCommandNames.Summary, MonzeCommandNames.AiSummary);

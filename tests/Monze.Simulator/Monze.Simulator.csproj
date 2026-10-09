@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+    <RootNamespace>Monze.Simulator</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Kestrel for SimHttpHost (Agent SSE, transcript and AI fakes); shared framework, no package. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Monze.csproj" />
+    <ProjectReference Include="..\Monze.Testing\Monze.Testing.csproj" />
+  </ItemGroup>
+</Project>

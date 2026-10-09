@@ -4,6 +4,5 @@ public enum ClanScanDisposition
 {
     Unchanged,
     Inserted,
-    OwnerReplaced,
-    IncompleteList
+    OwnerReplaced
 }

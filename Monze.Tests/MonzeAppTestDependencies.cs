@@ -52,6 +52,7 @@ internal sealed class MonzeAppTestDependencies :
     public bool AiAllowed { get; set; } = true;
     public bool HistoryHasGap { get; set; }
     public int AiBudgetCalls { get; private set; }
+    public List<(long ClanId, long UserId, int Tokens)> AiRefunds { get; } = [];
     public int AiProviderCalls { get; private set; }
     public string? AiResponse { get; set; } = "Kết quả AI";
     public Func<string, string, CancellationToken, Task<string?>>? AiHandler { get; set; }
@@ -66,7 +67,8 @@ internal sealed class MonzeAppTestDependencies :
     public MonzeApp CreateApp(
         bool withAi = false,
         bool withRoleGateway = false,
-        AiExecutionOptions? aiOptions = null)
+        AiExecutionOptions? aiOptions = null,
+        TimeProvider? timeProvider = null)
     {
         var app = new MonzeApp(
             this,
@@ -78,7 +80,8 @@ internal sealed class MonzeAppTestDependencies :
             this,
             new MemoryWelcomeDraftStore(),
             withAi ? this : null,
-            aiOptions: aiOptions);
+            aiOptions: aiOptions,
+            timeProvider: timeProvider);
         if (withRoleGateway)
         {
             app.AttachRoleGateway(this);
@@ -403,7 +406,8 @@ internal sealed class MonzeAppTestDependencies :
         string leaseToken,
         DateTimeOffset? nextRunAt,
         bool failed,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? errorCode = null)
         => Task.CompletedTask;
 
     public Task<(bool Allowed, int Used)> ConsumeAiAsync(
@@ -415,6 +419,12 @@ internal sealed class MonzeAppTestDependencies :
     {
         AiBudgetCalls++;
         return Task.FromResult((AiAllowed, AiAllowed ? tokens : dailyCap));
+    }
+
+    public Task RefundAiAsync(long clanId, long userId, int tokens, CancellationToken cancellationToken)
+    {
+        AiRefunds.Add((clanId, userId, tokens));
+        return Task.CompletedTask;
     }
 
     public Task<bool> ChannelPersistsAsync(long clanId, long channelId, CancellationToken cancellationToken)

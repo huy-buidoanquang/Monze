@@ -27,7 +27,8 @@ public static class MonzeRedisRegistration
                 multiplexer,
                 environment,
                 botId,
-                provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MonzeReadModelCache>>()));
+                provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MonzeReadModelCache>>(),
+                provider.GetService<TimeProvider>()));
         services.Replace(
             ServiceDescriptor.Singleton<Monze.Application.IReadModelCache>(
                 provider => provider.GetRequiredService<MonzeReadModelCache>()));
