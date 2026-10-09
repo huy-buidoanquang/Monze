@@ -153,7 +153,7 @@ public sealed class PostgresSchedulingRepository : ISchedulingRepository
             WHERE item.id = due.id
             RETURNING item.id, item.clan_id, item.channel_id, item.requester_id,
                       item.kind, item.when_text, item.timezone, item.next_run_at,
-                      item.lease_token, item.title;
+                      item.lease_token, item.title, item.last_error;
             """, connection);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -174,7 +174,8 @@ public sealed class PostgresSchedulingRepository : ISchedulingRepository
                 reader.GetString(6),
                 reader.GetFieldValue<DateTimeOffset>(7),
                 reader.GetString(8),
-                reader.GetString(9)));
+                reader.GetString(9),
+                reader.IsDBNull(10) ? null : reader.GetString(10)));
         }
 
         return rows;
@@ -185,7 +186,8 @@ public sealed class PostgresSchedulingRepository : ISchedulingRepository
         string leaseToken,
         DateTimeOffset? nextRunAt,
         bool failed,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? errorCode = null)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
@@ -197,7 +199,8 @@ public sealed class PostgresSchedulingRepository : ISchedulingRepository
                 END,
                 next_run_at = COALESCE(@next, next_run_at),
                 locked_until = NULL,
-                lease_token = NULL
+                lease_token = NULL,
+                last_error = @error
             WHERE id = @id AND lease_token = @lease;
             """, connection);
         command.Parameters.AddWithValue("id", id);
@@ -206,6 +209,10 @@ public sealed class PostgresSchedulingRepository : ISchedulingRepository
         command.Parameters.Add(new NpgsqlParameter("next", NpgsqlDbType.TimestampTz)
         {
             Value = (object?)nextRunAt ?? DBNull.Value
+        });
+        command.Parameters.Add(new NpgsqlParameter("error", NpgsqlDbType.Text)
+        {
+            Value = (object?)errorCode ?? DBNull.Value
         });
         await command.ExecuteNonQueryAsync(cancellationToken);
     }

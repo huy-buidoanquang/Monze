@@ -55,7 +55,7 @@ public sealed class PostgresRoleRepository : IRoleRepository
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
-            SELECT r.clan_id, r.role_id, r.rule_kind, r.condition_value, r.version
+            SELECT r.clan_id, r.role_id, r.rule_kind, r.condition_value, r.version, r.updated_at
             FROM role_rule r
             JOIN clan_registry c ON c.clan_id = r.clan_id
             JOIN clan_settings s ON s.clan_id = r.clan_id
@@ -73,7 +73,7 @@ public sealed class PostgresRoleRepository : IRoleRepository
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
-            SELECT r.clan_id, r.role_id, r.rule_kind, r.condition_value, r.version
+            SELECT r.clan_id, r.role_id, r.rule_kind, r.condition_value, r.version, r.updated_at
             FROM role_rule r
             JOIN clan_registry c ON c.clan_id = r.clan_id
             JOIN clan_settings s ON s.clan_id = r.clan_id
@@ -196,7 +196,8 @@ public sealed class PostgresRoleRepository : IRoleRepository
                 reader.GetInt64(1),
                 kind,
                 reader.IsDBNull(3) ? null : reader.GetString(3),
-                reader.GetInt64(4)));
+                reader.GetInt64(4),
+                reader.GetFieldValue<DateTimeOffset>(5)));
         }
 
         return rules;

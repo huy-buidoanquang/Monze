@@ -22,6 +22,41 @@ public sealed class MeetingAreaTests
 {
     private static readonly TimeZoneInfo Vietnam = TimeZoneInfo.FindSystemTimeZoneById("Asia/Ho_Chi_Minh");
 
+    /// <summary>
+    /// CAND-27 (decided: tell the creator): a scheduled meeting that finds no
+    /// free voice room is postponed by 5 minutes and its requester is told
+    /// once, privately in the schedule's channel; a further postponement of
+    /// the same occurrence says nothing more.
+    /// </summary>
+    [DbFact]
+    [Req("REQ-MTG-002")]
+    [Covers("msg:SchedulePostponed")]
+    public async Task A_schedule_with_every_room_busy_tells_its_requester_once()
+    {
+        var world = AreaWorld.Create();
+        world.JoinVoice(VoiceId, Member2Id);
+        await using var host = await E2EActions.StartAsync("meeting_schedule_busy", world);
+        var id = await host.ScalarAsync<long>(
+            "INSERT INTO meeting_schedule(clan_id, channel_id, requester_id, title, kind, when_text, timezone, next_run_at, status) VALUES (@clan, @channel, @user, 'Họp tuần', 'Once', '18:30', 'Asia/Ho_Chi_Minh', now() - interval '1 second', 'active') RETURNING id;",
+            ("clan", ClanId),
+            ("channel", GeneralId),
+            ("user", MemberId));
+        await E2EActions.WaitUntilAsync(host, () => Task.FromResult(Notices(host, id) == 1), "the requester's notice");
+        Assert.Equal("no-voice-room", await host.ScalarAsync<string>("SELECT last_error FROM meeting_schedule WHERE id = @id;", ("id", id)));
+
+        await host.ScalarAsync<int>("UPDATE meeting_schedule SET next_run_at = now() - interval '1 second' WHERE id = @id RETURNING 1;", ("id", id));
+        await E2EActions.WaitUntilAsync(host, async () => await host.ScalarAsync<bool>("SELECT next_run_at > now() FROM meeting_schedule WHERE id = @id;", ("id", id)), "the second postponement");
+        await host.Recorder.WaitForQuietAsync(TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(5));
+
+        Assert.Equal(1, Notices(host, id));
+    }
+
+    private static int Notices(MonzeE2EHost host, long scheduleId)
+        => host.Recorder.Actions.Count(action => action.Kind == SimActionKind.SendEphemeral
+            && action.ChannelId == GeneralId
+            && action.TargetUserId == MemberId
+            && E2EContent.Visible(action).Contains(MonzeMessages.SchedulePostponed("Họp tuần", scheduleId), StringComparison.Ordinal));
+
     [DbFact]
     [Req("REQ-MTG-001")]
     [Covers("msg:NoVoiceRoom", "msg:MeetingAgentInstruction", "cmd:meeting")]
@@ -142,7 +177,9 @@ public sealed class MeetingAreaTests
             await Task.Delay(50);
         }
 
-        await E2EOracles.AssertAsync(host, due, new ScenarioExpectation { OtherOutputs = 1 });
+        // CAND-27: the second schedule's requester is told privately that it waits for a room.
+        await host.Recorder.WaitForAsync(static action => action.Kind == SimActionKind.SendEphemeral && action.ChannelId == GeneralId, E2EOracles.Timeout, due.Sequence);
+        await E2EOracles.AssertAsync(host, due, new ScenarioExpectation { OtherOutputs = 2 });
         Assert.Equal($"@here Mọi người tham gia phòng {VoiceLabel} để bắt đầu cuộc hội thoại.", E2EContent.Parse(suggestion).Text);
         Assert.StartsWith("Cuộc hội thoại được lên lịch: ", E2EContent.Parse(suggestion).Embeds![0].Title, StringComparison.Ordinal);
         var rows = await SchedulesAsync(host);

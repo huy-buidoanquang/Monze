@@ -79,6 +79,16 @@ public static class MonzeMessages
         string timeZoneId)
         => $"Đã lưu lịch \"{name}\" (#{id}), kiểu {kind.ToString().ToLowerInvariant()}, lần tới {LocalSchedule.Describe(next, timeZoneId)}.";
 
+    /// <summary>CAND-27: the creator's other schedules in the channel less than 30 minutes from the new one.</summary>
+    public static string ScheduleOverlap(IReadOnlyList<MeetingScheduleSummary> schedules)
+        => "Lưu ý: lịch này cách chưa tới 30 phút so với "
+            + string.Join(", ", schedules.Select(static schedule => $"\"{schedule.Name}\" (#{schedule.Id}, {LocalSchedule.Describe(schedule.NextRunAt, schedule.TimeZoneId)})"))
+            + ". Các cuộc họp có thể tranh phòng voice.";
+
+    /// <summary>CAND-27: told to the requester once per occurrence that waits for a free voice room.</summary>
+    public static string SchedulePostponed(string name, long id)
+        => $"Lịch \"{name}\" (#{id}) chưa bắt đầu được vì không còn phòng voice trống. Monze sẽ thử lại mỗi 5 phút.";
+
     public static string UnknownCommand(MonzeCommandOptions options)
         => $"Lệnh không rõ. Gõ {options.HelpCommand}.";
 

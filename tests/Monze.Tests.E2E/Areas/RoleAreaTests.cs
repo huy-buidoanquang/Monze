@@ -149,6 +149,14 @@ public sealed class RoleAreaTests
         var rule = await E2EActions.CommandAsync(host, GeneralId, OwnerId, "*role join Developer");
         var on = await E2EActions.CommandAsync(host, GeneralId, OwnerId, "*role on");
 
+        // An on-join rule is for members who join after it is set (CAND-22): Monze and a member
+        // join after it here without a join event (joins the bot missed), which the scan catches up on.
+        foreach (var userId in new[] { Member2Id, BotId })
+        {
+            var member = host.World.FindMember(ClanId, userId)!;
+            host.World.AddMember(ClanId, userId, member.ClanNick, DateTimeOffset.UtcNow.AddMinutes(1), member.RoleIds);
+        }
+
         // The scan grants member by member; let it finish before checking that it stays quiet.
         await host.Recorder.WaitForAsync(static action => action.Kind == SimActionKind.RoleAssignment, E2EOracles.Timeout, mark.Sequence);
         await host.Recorder.WaitForQuietAsync(TimeSpan.FromSeconds(1.5), E2EOracles.Timeout);
@@ -158,7 +166,7 @@ public sealed class RoleAreaTests
             .Where(static action => action.Kind == SimActionKind.RoleAssignment)
             .SelectMany(static action => action.AddedUserIds)
             .ToList();
-        Assert.NotEmpty(granted);
+        Assert.Equal(new[] { Member2Id }, granted.Distinct());
         Assert.DoesNotContain(BotId, granted);
         Assert.DoesNotContain(BotId, await GrantsAsync(host, DeveloperRoleId));
     }

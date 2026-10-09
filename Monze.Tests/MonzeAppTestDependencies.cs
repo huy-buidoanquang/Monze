@@ -406,7 +406,8 @@ internal sealed class MonzeAppTestDependencies :
         string leaseToken,
         DateTimeOffset? nextRunAt,
         bool failed,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? errorCode = null)
         => Task.CompletedTask;
 
     public Task<(bool Allowed, int Used)> ConsumeAiAsync(

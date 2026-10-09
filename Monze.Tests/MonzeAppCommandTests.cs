@@ -263,7 +263,7 @@ public sealed class MonzeAppCommandTests
             RoleAutomationEnabled = true,
             RoleRules =
             [
-                new AutoRoleRule(ClanId, 70, RoleRuleKind.OnJoin, null, 1),
+                new AutoRoleRule(ClanId, 70, RoleRuleKind.OnJoin, null, 1, joinedAt.AddDays(-1)),
                 new AutoRoleRule(ClanId, 80, RoleRuleKind.Tenure, "30", 1)
             ],
             Members =
@@ -314,7 +314,7 @@ public sealed class MonzeAppCommandTests
         {
             RoleAutomationEnabled = true,
             RoleAssignment = new RoleAssignmentResult(false, 0),
-            RoleRules = [new AutoRoleRule(ClanId, 70, RoleRuleKind.OnJoin, null, 1)],
+            RoleRules = [new AutoRoleRule(ClanId, 70, RoleRuleKind.OnJoin, null, 1, DateTimeOffset.UtcNow.AddDays(-1))],
             Members = [new MemberRoleSnapshot(3, false, DateTimeOffset.UtcNow, new HashSet<long>())]
         };
         var app = dependencies.CreateApp(withRoleGateway: true);
@@ -323,6 +323,35 @@ public sealed class MonzeAppCommandTests
 
         Assert.Single(dependencies.RoleAssignments);
         Assert.Empty(dependencies.RecordedRoleGrants);
+    }
+
+    /// <summary>
+    /// CAND-22 (decided: an on-join rule is for new members only): the
+    /// periodic scan grants the role to a member who joined after the rule
+    /// was set (a join the bot missed) but not to earlier members or to one
+    /// whose join time is unknown.
+    /// </summary>
+    [Fact]
+    [Req("REQ-ROLE-002")]
+    public async Task The_periodic_scan_applies_an_on_join_rule_only_to_members_who_joined_after_it()
+    {
+        var ruleSet = DateTimeOffset.UtcNow.AddDays(-7);
+        var dependencies = new MonzeAppTestDependencies
+        {
+            RoleAutomationEnabled = true,
+            RoleRules = [new AutoRoleRule(ClanId, 70, RoleRuleKind.OnJoin, null, 1, ruleSet)],
+            Members =
+            [
+                new MemberRoleSnapshot(3, false, ruleSet.AddDays(-30), new HashSet<long>()),
+                new MemberRoleSnapshot(4, false, null, new HashSet<long>()),
+                new MemberRoleSnapshot(5, false, ruleSet.AddDays(2), new HashSet<long>())
+            ]
+        };
+        var app = dependencies.CreateApp(withRoleGateway: true);
+
+        await app.ApplyAutomaticRoleRulesAsync(CancellationToken.None);
+
+        Assert.Equal(new[] { 5L }, dependencies.RoleAssignments.Select(static item => item.UserId));
     }
 
     /// <summary>Regression for CAND-24: a grant that keeps failing is retried on the next scan, then less and less often.</summary>
@@ -334,7 +363,7 @@ public sealed class MonzeAppCommandTests
         {
             RoleAutomationEnabled = true,
             RoleAssignment = new RoleAssignmentResult(false, 0),
-            RoleRules = [new AutoRoleRule(ClanId, 70, RoleRuleKind.OnJoin, null, 1)],
+            RoleRules = [new AutoRoleRule(ClanId, 70, RoleRuleKind.OnJoin, null, 1, DateTimeOffset.UtcNow.AddDays(-1))],
             Members = [new MemberRoleSnapshot(3, false, DateTimeOffset.UtcNow, new HashSet<long>())]
         };
         var app = dependencies.CreateApp(withRoleGateway: true);
@@ -398,6 +427,41 @@ public sealed class MonzeAppCommandTests
             CancellationToken.None);
         Assert.Equal(MonzeMessages.VoiceClaimConflict, conflicted.Text);
         Assert.Null(conflicted.MeetingInvitation);
+    }
+
+    /// <summary>
+    /// CAND-27 (decided: tell the creator): a schedule less than 30 minutes
+    /// from another one the creator can see in the channel is still saved,
+    /// with a warning that names the nearby schedule.
+    /// </summary>
+    [Fact]
+    [Req("REQ-MTG-002")]
+    public async Task A_schedule_near_another_is_saved_with_a_warning()
+    {
+        var day = DateTimeOffset.UtcNow.AddDays(2);
+        var at = new DateTimeOffset(day.Year, day.Month, day.Day, 18, 30, 0, TimeSpan.FromHours(7));
+        var dependencies = new MonzeAppTestDependencies
+        {
+            MeetingSchedules =
+            [
+                new MeetingScheduleSummary(11, "Standup", MeetingScheduleKind.Once, at.AddMinutes(15), "Asia/Ho_Chi_Minh", UserId),
+                new MeetingScheduleSummary(12, "Retro", MeetingScheduleKind.Once, at.AddHours(2), "Asia/Ho_Chi_Minh", UserId)
+            ]
+        };
+        var app = dependencies.CreateApp();
+
+        var scheduled = await app.HandleMeetingAsync(
+            ClanId,
+            ChannelId,
+            UserId,
+            ["Daily", at.ToString("dd/MM/yyyy", System.Globalization.CultureInfo.InvariantCulture), "18:30", "once"],
+            _ => Task.FromResult<MeetingVoiceCandidate?>(null),
+            CancellationToken.None);
+
+        Assert.Equal(MonzeTone.Warn, scheduled.Tone);
+        Assert.Equal(1, dependencies.ScheduleCreateCalls);
+        Assert.Contains("\"Standup\" (#11", scheduled.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Retro", scheduled.Text, StringComparison.Ordinal);
     }
 
     [Fact]

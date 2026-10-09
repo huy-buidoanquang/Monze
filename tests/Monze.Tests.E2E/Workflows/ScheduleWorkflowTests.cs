@@ -51,7 +51,10 @@ public sealed class ScheduleWorkflowTests
             host,
             async () => await host.ScalarAsync<long>("SELECT count(*) FROM meeting_schedule WHERE status = 'running';") == 0,
             "the scheduler to release its leases");
-        await E2EOracles.AssertAsync(host, due, new ScenarioExpectation { OtherOutputs = 3 });
+
+        // CAND-27: the clashing schedule's requester is told privately that it waits for a room.
+        await host.Recorder.WaitForAsync(static action => action.Kind == SimActionKind.SendEphemeral && action.TargetUserId == OwnerId, E2EOracles.Timeout, due.Sequence);
+        await E2EOracles.AssertAsync(host, due, new ScenarioExpectation { OtherOutputs = 4 });
 
         var rows = (await host.RowsAsync("SELECT title, kind, status, next_run_at, when_text, timezone FROM meeting_schedule ORDER BY id;")).ToDictionary(static row => (string)row[0]!);
         Assert.Equal("completed", rows["Once"][2]);
@@ -93,6 +96,7 @@ public sealed class ScheduleWorkflowTests
             host,
             async () => await host.ScalarAsync<long>("SELECT count(*) FROM meeting_schedule WHERE title = 'Busy' AND status = 'active' AND next_run_at > now() + interval '4 minutes';") == 1,
             "the busy schedule to be postponed");
+        await host.Recorder.WaitForAsync(static action => action.Kind == SimActionKind.SendEphemeral && action.TargetUserId == OwnerId, E2EOracles.Timeout, phase.Sequence);
 
         // The room frees up; the next schedule is cancelled while the worker holds its lease.
         await host.Inbound.VoiceLeaveAsync(ClanId, VoiceId, Member2Id);
@@ -106,7 +110,8 @@ public sealed class ScheduleWorkflowTests
         await Task.Delay(TimeSpan.FromSeconds(2.5));
         Assert.Equal("cancelled", await host.ScalarAsync<string>("SELECT status FROM meeting_schedule WHERE title = 'Cancelled';"));
         Assert.Equal(0L, await host.ScalarAsync<long>("SELECT count(*) FROM meeting_session WHERE meeting_title = 'Cancelled';"));
-        await E2EOracles.AssertAsync(host, phase, ScenarioExpectation.Of((cancel, ResponseKind.Reply)));
+        // OtherOutputs: the Busy schedule's private "waits for a room" notice (CAND-27).
+        await E2EOracles.AssertAsync(host, phase, new ScenarioExpectation { Inputs = ScenarioExpectation.Of((cancel, ResponseKind.Reply)).Inputs, OtherOutputs = 1 });
         Assert.Contains(MonzeMessages.MeetingScheduleCancelled, E2EContent.Visible(E2EActions.NewMessageAfter(host, cancel, GeneralId)));
 
         // A worker died holding the lease of the next schedule.

@@ -240,6 +240,7 @@ public sealed partial class MonzeApp
             var rule = rules[i];
             if ((onJoinOnly && rule.Kind != RoleRuleKind.OnJoin)
                 || rule.Kind is not (RoleRuleKind.OnJoin or RoleRuleKind.Tenure)
+                || (!onJoinOnly && rule.Kind == RoleRuleKind.OnJoin && !JoinedSinceRule(member, rule))
                 || member.RoleIds.Contains(rule.RoleId)
                 || (assignedRoleIds is not null && assignedRoleIds.Contains(rule.RoleId))
                 || !MatchesAutomaticRule(rule, member))
@@ -298,6 +299,15 @@ public sealed partial class MonzeApp
             _failedGrants[grant] = (failures, Math.Min(1 << Math.Min(failures - 1, 30), MaxSkippedScans + 1));
         }
     }
+
+    /// <summary>
+    /// An on-join rule is for members who join after it is set (CAND-22): the
+    /// periodic scan only catches up on those (a join missed while the bot
+    /// was offline, a grant that failed), never on earlier members or on a
+    /// member whose join time is unknown.
+    /// </summary>
+    private static bool JoinedSinceRule(MemberRoleSnapshot member, AutoRoleRule rule)
+        => member.JoinedAt is { } joinedAt && rule.EffectiveSince is { } since && joinedAt >= since;
 
     private bool MatchesAutomaticRule(AutoRoleRule rule, MemberRoleSnapshot member)
         => rule.Kind switch

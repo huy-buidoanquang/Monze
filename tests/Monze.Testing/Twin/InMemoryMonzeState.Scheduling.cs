@@ -146,7 +146,8 @@ public sealed partial class InMemoryMonzeState
                     row.TimeZoneId,
                     row.NextRunAt,
                     leaseToken,
-                    row.Title));
+                    row.Title,
+                    row.LastError));
             }
 
             return Task.FromResult<IReadOnlyList<DueMeetingSchedule>>(claimed);
@@ -158,7 +159,8 @@ public sealed partial class InMemoryMonzeState
         string leaseToken,
         DateTimeOffset? nextRunAt,
         bool failed,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? errorCode = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         DateTimeOffset? next = nextRunAt is { } value ? ToTimestamptz(value, nameof(nextRunAt)) : null;
@@ -177,6 +179,7 @@ public sealed partial class InMemoryMonzeState
             row.NextRunAt = next ?? row.NextRunAt;
             row.LockedUntil = null;
             row.LeaseToken = null;
+            row.LastError = errorCode;
         }
 
         return Task.CompletedTask;

@@ -95,7 +95,7 @@
       "area": "meeting",
       "title": "Lịch meeting once/daily/weekly theo time zone, mỗi lần chạy đúng một occurrence",
       "legacyTestIds": ["WRK-SCHEDULE", "PORT-SCHEDULED", "PORT-SCHEDULING"],
-      "covers": ["port:ISchedulingRepository.*", "port:IScheduledMeetingRepository.*", "table:meeting_schedule", "log@Features/Meeting/MonzeBot.ScheduledMeetings.cs"],
+      "covers": ["port:ISchedulingRepository.*", "port:IScheduledMeetingRepository.*", "table:meeting_schedule", "log@Features/Meeting/MonzeBot.ScheduledMeetings.cs", "msg:ScheduleOverlap", "msg:SchedulePostponed"],
       "tests": ["PostgresSchedulingRepositoryTests.*", "PostgresScheduledMeetingRepositoryTests.*", "DomainRulesTests.*"]
     },
     {

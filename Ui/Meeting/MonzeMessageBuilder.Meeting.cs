@@ -188,6 +188,19 @@ public static partial class MonzeMessageBuilder
             rows);
     }
 
+    /// <summary>
+    /// CAND-27: told privately to a schedule's requester when no voice room is
+    /// free at its time, with the schedule's cancel button.
+    /// </summary>
+    public static MessageContent SchedulePostponed(string name, long scheduleId)
+        => BuildWithRows(
+            MonzeMessages.TitleMeeting,
+            MonzeEmbedColors.For(MonzeTone.Warn),
+            [new MessageEmbedField("Lịch họp", MonzeMessages.SchedulePostponed(name, scheduleId))],
+            [new ButtonBuilder()
+                .AddButton(MeetingButtonId.CancelFor(scheduleId), $"Hủy #{scheduleId}", style: (int)MessageButtonStyle.Danger)
+                .BuildComponents()]);
+
     public static MessageContent MeetingScheduleForm(string? error = null)
     {
         var fields = new List<MessageEmbedField>(5);

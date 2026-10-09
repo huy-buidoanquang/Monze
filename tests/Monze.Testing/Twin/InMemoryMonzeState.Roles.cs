@@ -162,7 +162,7 @@ public sealed partial class InMemoryMonzeState
                 continue;
             }
 
-            rules.Add(new AutoRoleRule(key.ClanId, key.RoleId, kind, rule.ConditionValue, rule.Version));
+            rules.Add(new AutoRoleRule(key.ClanId, key.RoleId, kind, rule.ConditionValue, rule.Version, rule.UpdatedAt));
         }
 
         return rules;
