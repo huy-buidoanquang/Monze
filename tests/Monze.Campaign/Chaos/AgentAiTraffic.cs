@@ -375,7 +375,10 @@ public sealed class AgentAiTraffic
         }
 
         var bound = await WaitForStatusAsync(room, TimeSpan.FromSeconds(10), "live", "summary_pending", "posted");
-        if (bound)
+
+        // A room_started published while no instance was subscribed is replayed after the
+        // reconnect: its wait measures the outage, not Monze.
+        if (bound && cycle.Clean)
         {
             BindLatency.Record(TimeSpan.FromTicks((Stopwatch.GetTimestamp() - cycle.StartedTicks) * TimeSpan.TicksPerSecond / Stopwatch.Frequency));
         }

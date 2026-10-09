@@ -30,24 +30,14 @@ public static class ChaosScenarios
         new("PG-02", "PostgreSQL", "stop rồi start container", static context => context.Environment.Docker.StopAsync(context.Environment.PostgresContainer, TimeSpan.FromSeconds(10)), TimeSpan.FromSeconds(15)),
         new("PG-03", "PostgreSQL", "SIGKILL rồi khởi động lại", static context => context.Environment.Docker.KillAsync(context.Environment.PostgresContainer), TimeSpan.FromSeconds(10)),
         new("PG-04a", "PostgreSQL", "trễ 200 ms mỗi chiều trong 30 s", static context => Latency(context.Environment.PostgresProxy, 200), TimeSpan.FromSeconds(30)),
-        new("PG-04b", "PostgreSQL", "trễ 2 s mỗi chiều trong 20 s", static context => Latency(context.Environment.PostgresProxy, 2_000), TimeSpan.FromSeconds(20))
-        {
-            // A 256-row batch outlives its 60 s lease at this latency and is reclaimed and resent.
-            KnownDefect = "DEF-07",
-            KnownGapInvariants = ["outbox-exactly-once"]
-        },
+        new("PG-04b", "PostgreSQL", "trễ 2 s mỗi chiều trong 20 s", static context => Latency(context.Environment.PostgresProxy, 2_000), TimeSpan.FromSeconds(20)),
         new("PG-05", "PostgreSQL", "reset mọi kết nối 3 lần cách 5 s", static context => ResetRepeatedly(context.Environment.PostgresProxy, 3, TimeSpan.FromSeconds(5)), TimeSpan.FromSeconds(15)) { Quick = true },
         new("PG-06", "PostgreSQL", "blackhole ngay sau ack của một lần gửi outbox, 20 s", BlackholeAfterOutboxAck, TimeSpan.FromSeconds(20))
         {
-            Observe = TimeSpan.FromSeconds(80),
-            KnownDefect = "DEF-07",
-            KnownGapInvariants = ["outbox-exactly-once"]
+            Observe = TimeSpan.FromSeconds(80)
         },
         new("PG-07", "PostgreSQL", "database không sẵn sàng lúc khởi động 20 s", static _ => Task.CompletedTask, TimeSpan.Zero)
         {
-            // Startup validates the schema once and stops the host on the first connection error.
-            KnownDefect = "CAND-29",
-            KnownGapInvariants = ["completed"],
             BeforeStart = static context =>
             {
                 context.Environment.PostgresProxy.Mode = TcpFaultMode.Refuse;
@@ -68,12 +58,7 @@ public static class ChaosScenarios
         {
             UsesRedis = true,
             ServedDuringFault = true,
-            Quick = true,
-
-            // A paused Redis times out (RedisTimeoutException is not a RedisException): no fallback
-            // cooldown, so every welcome read during the pause waits for the Redis timeout first.
-            KnownDefect = "DEF-01",
-            KnownGapInvariants = ["welcome-fast-during-fault"]
+            Quick = true
         },
         new("RD-03", "Redis", "trễ 200 ms mỗi chiều trong 20 s", static context => Latency(context.Environment.RedisProxy, 200), TimeSpan.FromSeconds(20)) { UsesRedis = true, ServedDuringFault = true },
         new("RD-04", "Redis", "reset kết nối (mất pub/sub) 3 lần", static context => ResetRepeatedly(context.Environment.RedisProxy, 3, TimeSpan.FromSeconds(5)), TimeSpan.FromSeconds(15)) { UsesRedis = true, ServedDuringFault = true },
@@ -87,15 +72,9 @@ public static class ChaosScenarios
         // Mezon (simulator)
         new("MZ-01", "Mezon", "server đóng socket", static context => Close(context, 1, TimeSpan.Zero), TimeSpan.FromSeconds(5))
         {
-            Quick = true,
-            KnownDefect = "CAND-21",
-            KnownGapInvariants = ["outbox-exactly-once"]
+            Quick = true
         },
-        new("MZ-02", "Mezon", "20 lần đóng socket trong 60 s", static context => Close(context, 20, TimeSpan.FromSeconds(3)), TimeSpan.FromSeconds(60))
-        {
-            KnownDefect = "CAND-21",
-            KnownGapInvariants = ["outbox-exactly-once"]
-        },
+        new("MZ-02", "Mezon", "20 lần đóng socket trong 60 s", static context => Close(context, 20, TimeSpan.FromSeconds(3)), TimeSpan.FromSeconds(60)),
         new("MZ-03", "Mezon", "ack gửi tin chậm 2 s trong 30 s", static context => Faults(context, plan => plan.Delay(SimOperations.ChannelMessageSend, TimeSpan.FromSeconds(2), times: 10_000).Delay(SimOperations.EphemeralMessageSend, TimeSpan.FromSeconds(2), times: 10_000)), TimeSpan.FromSeconds(30)),
         // Pre-registered DEF-09 (unbounded wait) did not reproduce: the SDK times the ack out,
         // the row is held as uncertain and the message (already on the wire) is not resent.
@@ -108,12 +87,12 @@ public static class ChaosScenarios
         {
             await Faults(context, plan => plan.RefuseConnect(times: 5));
             await context.RequireHost().Inbound.CloseSocketAsync();
-        }, TimeSpan.FromSeconds(20)) { KnownDefect = "CAND-21", KnownGapInvariants = ["outbox-exactly-once"] },
+        }, TimeSpan.FromSeconds(20)),
         new("MZ-08", "Mezon", "discovery lỗi 3 lần khi kết nối lại", static async context =>
         {
             await Faults(context, plan => plan.Fail(SimOperations.ListClanDescs, MezonStatusCode.Unavailable, times: 3));
             await context.RequireHost().Inbound.CloseSocketAsync();
-        }, TimeSpan.FromSeconds(20)) { KnownDefect = "CAND-21", KnownGapInvariants = ["outbox-exactly-once"] },
+        }, TimeSpan.FromSeconds(20)),
 
         // Agent SSE (SimHttpHost), with Agent meeting cycles and AI commands as extra load
         new("AG-01", "Agent", "server ngắt stream SSE 3 lần cách 7 s", static context => Repeat(TimeSpan.FromSeconds(21), TimeSpan.FromSeconds(7), () =>
@@ -123,12 +102,7 @@ public static class ChaosScenarios
         }), TimeSpan.FromSeconds(21))
         {
             UsesHttp = true,
-            Quick = true,
-
-            // Events published in the 3–4 s before the SDK reconnects are never replayed (no
-            // Last-Event-ID): meetings whose started or ended event fell in a gap are never summarized.
-            KnownDefect = "DEF-08",
-            KnownGapInvariants = ["meetings-summarized"]
+            Quick = true
         },
         new("AG-02", "Agent", "stream SSE half-open (kết nối còn, không byte nào tới) và không bao giờ được thay", static context =>
         {
@@ -136,11 +110,7 @@ public static class ChaosScenarios
             return Task.CompletedTask;
         }, TimeSpan.FromSeconds(20))
         {
-            UsesHttp = true,
-
-            // No idle detection: the dead stream is never replaced, so nothing after the fault is processed.
-            KnownDefect = "DEF-08",
-            KnownGapInvariants = ["agent-recovered", "meetings-summarized"]
+            UsesHttp = true
         },
         new("AG-03", "Agent", "mọi event Agent được giao hai lần trong 20 s", static context => Agent(context, static agent => agent.Delivery = SimSseDelivery.Duplicate), TimeSpan.FromSeconds(20)) { UsesHttp = true },
         new("AG-04", "Agent", "room_ended tới trước room_started trong 20 s", static context => Agent(context, static agent => agent.Reorder = true), TimeSpan.FromSeconds(20)) { UsesHttp = true },
@@ -201,12 +171,7 @@ public static class ChaosScenarios
         new("TR-01", "AI/Transcript", "transcript treo (client timeout 30 s) trong 40 s", static context => Http(context, static plan => plan.Hang(SimHttpRoute.TranscriptSummary, Many)), TimeSpan.FromSeconds(40))
         {
             UsesHttp = true,
-            WarpSummaryRetries = true,
-
-            // The Agent path fetches the transcript inside the single meeting-ingress reader:
-            // each hung fetch holds every Agent and voice-empty event for up to 30 s.
-            KnownDefect = "WF-04",
-            KnownGapInvariants = ["agent-events-timely"]
+            WarpSummaryRetries = true
         },
         new("TR-02", "AI/Transcript", "access token transcript bị thu hồi mỗi 3 s (401 → refresh)", static context => Repeat(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(3), () =>
         {
@@ -221,16 +186,11 @@ public static class ChaosScenarios
             UsesHttp = true,
             WarpSummaryRetries = true
         },
-        new("TR-04", "AI/Transcript", "transcript hợp lệ 600 KiB (giới hạn 512 KiB) trong 20 s", static context => Agent(context, static agent => agent.LargeTranscripts = true), TimeSpan.FromSeconds(20))
+        new("TR-04", "AI/Transcript", "transcript hợp lệ 600 KiB (trên giới hạn cũ 512 KiB) trong 20 s", static context => Agent(context, static agent => agent.LargeTranscripts = true), TimeSpan.FromSeconds(20))
         {
             UsesHttp = true,
             WarpSummaryRetries = true,
-            Timings = static timings => timings with { MaintenanceInterval = TimeSpan.FromSeconds(2) },
-
-            // HttpPayloadLimits.TranscriptResponseBytes = 512 KiB: a valid larger transcript is
-            // treated as "no summary" on every retry and the meeting is never summarized.
-            KnownDefect = "WF-03",
-            KnownGapInvariants = ["large-summaries-posted"]
+            Timings = static timings => timings with { MaintenanceInterval = TimeSpan.FromSeconds(2) }
         },
         new("TR-05", "AI/Transcript", "transcript rỗng: tám lần retry hết hạn (retry được warp)", static context =>
         {
@@ -247,9 +207,7 @@ public static class ChaosScenarios
         new("CLK-01", "Clock", "đồng hồ app nhảy +2 h", static context => Jump(context, TimeSpan.FromHours(2)), TimeSpan.FromSeconds(10)) { Heal = static _ => Task.CompletedTask },
         new("CLK-02", "Clock", "đồng hồ app lùi −2 h", static context => Jump(context, TimeSpan.FromHours(-2)), TimeSpan.FromSeconds(10))
         {
-            Heal = static _ => Task.CompletedTask,
-            KnownDefect = "DEF-10",
-            KnownGapInvariants = ["recovered", "served-after-recovery", "still-serving"]
+            Heal = static _ => Task.CompletedTask
         },
         new("CLK-04", "Clock", "app lệch database 90 s", static context => Jump(context, TimeSpan.FromSeconds(90)), TimeSpan.FromSeconds(10)) { Heal = static _ => Task.CompletedTask },
         new("CLK-03", "Clock", "đồng hồ app nhảy tới trước ngày đổi giờ mùa hè (Europe/Berlin 28/03/2027) khi lịch đến hạn", DstJumpAsync, TimeSpan.FromSeconds(15))
@@ -263,13 +221,7 @@ public static class ChaosScenarios
 
             // The jump is ~170 days; a 30-day inbox retention would purge every inbox row
             // on the next maintenance pass and hide the DST behaviour behind that effect.
-            Timings = static timings => timings with { InboxRetention = TimeSpan.FromDays(400) },
-
-            // The next 02:30 is looked up only today and tomorrow (daily) or on the next Sunday
-            // (weekly); it does not exist, so the worker completes the schedule before firing the
-            // due occurrence: that occurrence and every later one are lost.
-            KnownDefect = "CAND-09",
-            KnownGapInvariants = ["dst-recurring-survive"]
+            Timings = static timings => timings with { InboxRetention = TimeSpan.FromDays(400) }
         },
 
         // Process and events
@@ -281,11 +233,7 @@ public static class ChaosScenarios
             UsesHttp = true,
             ChecksSingleAnswer = true,
             Observe = TimeSpan.FromSeconds(70),
-            Heal = HealWithRestartAsync,
-
-            // Agent events published while no instance is subscribed are never replayed (no Last-Event-ID).
-            KnownDefect = "DEF-08",
-            KnownGapInvariants = ["meetings-summarized"]
+            Heal = HealWithRestartAsync
         },
         new("PR-06", "Process", "dừng Monze bình thường giữa tải khi outbox đang gửi (ack chậm 500 ms), khởi động lại sau 15 s trên cùng database", static async context =>
         {
@@ -298,14 +246,7 @@ public static class ChaosScenarios
         {
             UsesHttp = true,
             ChecksSingleAnswer = true,
-            Heal = HealWithRestartAsync,
-            KnownDefect = "DEF-08",
-            KnownGapInvariants = ["meetings-summarized"],
-
-            // Sends in flight at the stop are acked, but their completion runs on the cancelled
-            // stopping token: the rows stay leased and are sent again once the lease expires.
-            // An AI command in flight is cancelled silently: its loading card is never updated.
-            OtherKnownGaps = [("WF-05", "outbox-exactly-once"), ("WF-06", "ai-answered")]
+            Heal = HealWithRestartAsync
         },
         new("PR-07", "Process", "hai instance chồng nhau 30 s trên cùng database và platform, rồi một instance dừng", static context => context.StartInstanceAsync(sameDataDirectory: false), TimeSpan.FromSeconds(30))
         {
@@ -459,26 +400,35 @@ public static class ChaosScenarios
     }
 
     /// <summary>
-    /// Three Europe/Berlin schedules due now (daily 02:30, weekly Sunday 02:30
-    /// and a daily 09:00 control) in the last load clan, and the app clock on
-    /// Saturday 27/03/2027 11:00 CET: the next 02:30 (Sunday 28/03) does not
-    /// exist because the clocks go from 02:00 to 03:00.
+    /// Three Europe/Berlin schedules due now (daily 02:30 and weekly Sunday
+    /// 02:30 in the last load clan, a daily 09:00 control in the clan before
+    /// it, so the control does not compete with them for a clan's three voice
+    /// rooms, which background load also uses), and the app clock on Saturday
+    /// 27/03/2027 11:00 CET: the next 02:30 (Sunday 28/03) does not exist
+    /// because the clocks go from 02:00 to 03:00.
     /// </summary>
     private static async Task DstJumpAsync(ChaosContext context)
     {
         var host = context.RequireHost();
         var clan = context.World!.Clans[^1];
+        var control = context.World.Clans[^2];
         context.Clock.Offset = new DateTimeOffset(2027, 3, 27, 10, 0, 0, TimeSpan.Zero) - DateTimeOffset.UtcNow;
         await using var connection = new NpgsqlConnection(host.Database.ConnectionString);
         await connection.OpenAsync();
         await using var command = new NpgsqlCommand("""
             INSERT INTO meeting_schedule(clan_id, channel_id, requester_id, title, kind, when_text, timezone, next_run_at, status)
-            SELECT @clan, @channel, @owner, title, kind, when_text, 'Europe/Berlin', now() - interval '1 second', 'active'
-            FROM (VALUES ('DST daily 02:30', 'Daily', '02:30'), ('DST weekly 02:30', 'Weekly', 'cn 02:30'), ('DST daily 09:00', 'Daily', '09:00')) AS schedule(title, kind, when_text);
+            SELECT clan_id, channel_id, requester_id, title, kind, when_text, 'Europe/Berlin', now() - interval '1 second', 'active'
+            FROM (VALUES (@clan, @channel, @owner, 'DST daily 02:30', 'Daily', '02:30'),
+                         (@clan, @channel, @owner, 'DST weekly 02:30', 'Weekly', 'cn 02:30'),
+                         (@controlClan, @controlChannel, @controlOwner, 'DST daily 09:00', 'Daily', '09:00'))
+                AS schedule(clan_id, channel_id, requester_id, title, kind, when_text);
             """, connection);
         command.Parameters.AddWithValue("clan", clan.Id);
         command.Parameters.AddWithValue("channel", clan.Chat[2]);
         command.Parameters.AddWithValue("owner", clan.Owner);
+        command.Parameters.AddWithValue("controlClan", control.Id);
+        command.Parameters.AddWithValue("controlChannel", control.Chat[2]);
+        command.Parameters.AddWithValue("controlOwner", control.Owner);
         await command.ExecuteNonQueryAsync();
     }
 

@@ -164,9 +164,7 @@ public static class CapacityScenarios
         var lossy = pushed.Where(entry => stored.GetValueOrDefault(entry.Key) < entry.Value).Select(static entry => entry.Key).ToList();
         var unmarked = lossy.Count(channel => !marked.Contains(channel));
 
-        // A gap marker that finds the gap queue full is dropped with no fallback: its channel
-        // keeps has_gap = false although messages are missing.
-        return artifact.KnownGap("WF-07", "lossy-channels-marked")
+        return artifact
             .Metric("pushed", total)
             .Metric("pushPerSecond", total / burstSeconds)
             .Metric("messagesDropped", delta.Sum("monze.ingress.message.dropped"))

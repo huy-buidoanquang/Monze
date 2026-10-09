@@ -388,7 +388,7 @@ public static class ChaosRun
             .Invariant("meetings-summarized", "mọi chu kỳ meeting kết thúc posted, summary_failed có thông báo, hoặc còn lịch retry (không kẹt live, không mất phiên)", $"{report.Stuck} kẹt, {report.Missing} không có phiên ({report.StuckClean} kẹt dù mọi event đã tới Monze), {report.Lost} chu kỳ mất event ở upstream", report.Stuck + report.Missing == 0)
             .Invariant(
                 "agent-events-timely",
-                "room_started được áp dụng (phiên live) p99 ≤ 5 s (đề xuất; một lần chờ bị cắt ở 10 s)",
+                "room_started tới stream đang mở được áp dụng (phiên live) p99 ≤ 5 s (đề xuất; một lần chờ bị cắt ở 10 s)",
                 string.Create(CultureInfo.InvariantCulture, $"p99 {traffic.BindLatency.ValueAtPercentile(99) / 1000.0:0} ms over {traffic.BindLatency.Count}"),
                 traffic.BindLatency.Count > 0 && traffic.BindLatency.ValueAtPercentile(99) <= 5_000_000)
             .Invariant("summaries-once", "mỗi tóm tắt và danh sách đầu việc được gửi đúng một lần", $"{report.SummaryDuplicates} trùng", report.SummaryDuplicates == 0)

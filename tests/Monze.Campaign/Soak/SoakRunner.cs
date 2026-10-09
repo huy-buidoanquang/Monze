@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Monze.Campaign.Component;
 using Monze.Campaign.Load;
@@ -200,6 +201,16 @@ public static class SoakRunner
             {
                 artifact.Note(F($"{table}: +{perHour:0} dòng/h → {perHour * 24 * 30:N0} sau 30 ngày, {perHour * 24 * 365:N0} sau 365 ngày"));
             }
+        }
+
+        // Which errors (L7): long digit runs are masked so no raw id reaches the report.
+        foreach (var entry in logs.Entries
+            .Where(static entry => entry.Level >= LogLevel.Error)
+            .Select(static entry => $"{entry.Category}: {Regex.Replace(entry.Message, @"\d{6,}", "#")}{(entry.Exception is null ? string.Empty : $" [{entry.Exception.GetType().Name}]")}")
+            .Distinct()
+            .Take(5))
+        {
+            artifact.Note("log: " + entry);
         }
 
         return artifact;
