@@ -11,8 +11,8 @@ namespace Monze.Tests.E2E.Areas;
 /// <summary>
 /// Regression for CAND-19: a click event carries a client-supplied user_id.
 /// mezon-api MessageButtonClick (server/api_interactive_message.go) forwards
-/// the client's MessageButtonClicked unchanged and Mezon.Net.Sdk 1.6.2 marks
-/// every click ServerAuthenticated. Monze used to fall back to a
+/// the client's MessageButtonClicked unchanged; Mezon.Net.Sdk 1.7.0 marks
+/// every click ClientSupplied. Monze used to fall back to a
 /// (clan, channel, user) binding, so while the owner had a welcome setup
 /// open any member could save it with user_id = owner and any message id.
 /// Only the exact ephemeral message bound to its owner is accepted now.

@@ -22,12 +22,16 @@ mezon-api `bcc6e172` and the mezon-proto-server working tree of 2026-10-09.
   - `PrivateInteractionDecisionTableTests` (G32, row "R2 message binding, owner id forged")
 - **Upstream fix:** set `UserId` from `ctx.UserValue(ctxUserIDKey{})` as the
   dropdown handler does.
-- **Mezon.Net side:** commit `6f267e7` (tag `v1.7.0`; Monze still uses
-  `1.6.2`) already marks button actors as client-supplied, so
-  `RequireServerAuthenticatedActor()` rejects them. Once the server overwrites
-  the id, a release can mark them server-authenticated again.
-- **Monze change after release:** bump the SDK, require a server-authenticated
-  actor for every state-changing click, and flip the CAND-19 expectation in G32.
+- **Mezon.Net side:** commit `6f267e7` (tag `v1.7.0`, which Monze uses) marks
+  button actors as client-supplied, so `RequireServerAuthenticatedActor()`
+  rejects them. Once the server overwrites the id, a release can mark them
+  server-authenticated again.
+- **Monze on 1.7.0 (2026-10-16):** by the user's decision, private buttons no
+  longer require a server-authenticated actor. The message binding above is the
+  only check, as it effectively was on 1.6.2.
+- **Monze change after the server fix and a release that restores trust:**
+  require a server-authenticated actor for every state-changing click, and flip
+  the CAND-19 expectation in G32.
 
 ## 2. Clan discovery returns at most 100 clans (DEF-06, mezon-api)
 
@@ -109,6 +113,11 @@ mezon-api `bcc6e172` and the mezon-proto-server working tree of 2026-10-09.
 
 ## 5. SQLite write pump stops after one failed batch (CAND-18, Mezon.Net)
 
+- **Status:** fixed in Mezon.Net 1.7.0 (commit `d4d58ce`), which Monze uses. A
+  failed batch is rolled back, the pump keeps running and the next `FlushAsync`
+  reports the failure once. `SqliteMessageStoreFaultTests` now asserts that, and
+  `MonzeBot.CloseMessageStoreAsync` logs the reported failure and still closes
+  the store. The rest of this section describes 1.6.2.
 - **Source:** `src/Mezon.Net.Sdk.Caching.Sqlite/Internal/BatchWritePump.cs`.
   - `DrainQueueAsync` rolls back a failed batch and rethrows (line 132).
   - `RunAsync` (lines 64-79) catches only cancellation, so the pump ends.

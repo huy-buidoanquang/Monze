@@ -258,7 +258,7 @@ public sealed partial class MonzeBot
         var message = (ChannelMessageResponse)evt;
         if (message.ClanId == 0 && IsCommandText(message.Content))
         {
-            // The SDK drops commands outside a clan before any handler runs (CAND-26).
+            // ConfigureCommands does not dispatch commands outside a clan (CAND-26).
             _logger.LogInformation("A Monze command sent in a direct message was ignored; commands work in clan channels.");
         }
 

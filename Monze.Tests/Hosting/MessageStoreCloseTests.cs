@@ -8,9 +8,9 @@ using Xunit;
 namespace Monze.Tests.Hosting;
 
 /// <summary>
-/// Monze's side of CAND-18: with the SDK store's write pump stopped by one
-/// failed batch (SqliteMessageStoreFaultTests), shutdown still ends within
-/// the close timeout and says that queued history writes were lost.
+/// Monze's side of CAND-18: when a history write batch failed, FlushAsync
+/// reports it (SqliteMessageStoreFaultTests); shutdown logs that the history
+/// was lost and still closes the store within the close timeout.
 /// </summary>
 public sealed class MessageStoreCloseTests
 {

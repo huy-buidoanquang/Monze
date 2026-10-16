@@ -10,16 +10,24 @@ public sealed partial class MonzeBot
 
     /// <summary>
     /// Flushes and closes the SDK message history store, each step bounded by
-    /// <paramref name="timeout"/>. SDK 1.6.2 (CAND-18): after one failed write
-    /// batch the store's write pump stops, FlushAsync never completes and
-    /// DisposeAsync waits for it, so an unbounded close would hang shutdown.
-    /// The store is left open when it cannot flush; the process is ending.
+    /// <paramref name="timeout"/>. FlushAsync throws the error of a write batch
+    /// that failed since the last flush; that history is lost, the store is
+    /// still closed. The store is left open when it cannot close in time; the
+    /// process is ending.
     /// </summary>
     internal static async Task CloseMessageStoreAsync(SqliteMessageStore store, TimeSpan timeout, ILogger logger, CancellationToken cancellationToken)
     {
         try
         {
-            await store.FlushAsync(cancellationToken).WaitAsync(timeout, cancellationToken);
+            try
+            {
+                await store.FlushAsync(cancellationToken).WaitAsync(timeout, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not TimeoutException and not OperationCanceledException)
+            {
+                logger.LogError(ex, "A message history write failed before shutdown; that history was not stored.");
+            }
+
             await store.DisposeAsync().AsTask().WaitAsync(timeout, cancellationToken);
         }
         catch (TimeoutException)

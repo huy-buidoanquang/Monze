@@ -7,11 +7,9 @@ namespace Monze.Tests;
 
 /// <summary>
 /// Monze keeps message history in the SDK's SqliteMessageStore, which writes
-/// on one background pump. Known gap CAND-18 (SDK 1.6.2,
-/// Internal/BatchWritePump.cs): a batch that fails once is rolled back and
-/// its exception ends the pump loop, so every later write is queued without
-/// bound and never stored, FlushAsync never completes and DisposeAsync,
-/// which waits for a flush, hangs Monze's shutdown.
+/// on one background pump. A batch that fails is rolled back, the pump keeps
+/// running and the next FlushAsync reports the failure once (CAND-18, fixed in
+/// SDK 1.7.0; in 1.6.2 the pump stopped and FlushAsync and DisposeAsync hung).
 /// </summary>
 public sealed class SqliteMessageStoreFaultTests
 {
@@ -32,14 +30,11 @@ public sealed class SqliteMessageStoreFaultTests
         }
 
         await store.UpsertMessageAsync(Message(2), 2);
-        await KnownDefect.ExpectFailureAsync("CAND-18", async () =>
-        {
-            await store.FlushAsync().WaitAsync(TimeSpan.FromSeconds(5));
-            Assert.NotNull(await store.TryGetMessageAsync(10, 2));
-            await store.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
-        });
+        await Assert.ThrowsAsync<SqliteException>(() => store.FlushAsync().WaitAsync(TimeSpan.FromSeconds(5)));
+        await store.FlushAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.NotNull(await store.TryGetMessageAsync(10, 2));
+        await store.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
 
-        // With the defect the store cannot be disposed; leave its file to the temp folder.
         SqliteConnection.ClearAllPools();
         try
         {

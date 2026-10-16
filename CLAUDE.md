@@ -136,7 +136,10 @@ The solution `Monze.slnx` targets net10.0 throughout.
 
 - **Authorization:**
   - Verify owner/admin/delegate permissions against PostgreSQL and Mezon immediately before every state-changing operation.
-  - Don't trust a client-supplied `user_id` or the actor identity from generic button events. State-changing interactions require a server-authenticated actor contract.
+  - Don't trust a client-supplied `user_id` or the actor identity from generic button events.
+  - Button clicks are client-supplied: mezon-api `MessageButtonClick` forwards the client's `user_id`, and SDK 1.7.0 marks every click `ClientSupplied`.
+    - Private buttons are accepted only on the exact ephemeral message bound to its owner (`EnsurePrivateInteractionAsync`), with no server-authenticated requirement. The user chose this on 2026-10-16; it leaves CAND-19 open.
+    - Require a server-authenticated actor again once mezon-api sets the user from the session and the SDK marks button clicks `ServerAuthenticated`.
 - **User-facing labels:**
   - Don't show raw clan, channel or user IDs.
   - Prefer channel labels and clan names. For users, prefer `clan_nick`, then `display_name`, then `user_name`.
@@ -164,7 +167,7 @@ The solution `Monze.slnx` targets net10.0 throughout.
 ## SDK and Workspace Boundaries
 
 - **Package set:**
-  - Keep the published packages in sync at version `1.6.2`: `Mezon.Net.Sdk`, `Mezon.Net.Sdk.Caching.Redis` and `Mezon.Net.Sdk.Caching.Sqlite`.
+  - Keep the published packages in sync at version `1.7.0`: `Mezon.Net.Sdk`, `Mezon.Net.Sdk.Caching.Redis` and `Mezon.Net.Sdk.Caching.Sqlite`.
   - Commit `packages.lock.json` and keep it consistent.
   - The `UseLocalMezonSdk` property in two csproj files is not read by anything.
 - **Contract references:** treat `Mezon.Net`, `mezon-api`, `mezon-proto-server`, `mezon`, `mezon-desktop`, `Mezube` and `pm-assistant-bot` as contract references. Change them only if the user explicitly authorizes it.

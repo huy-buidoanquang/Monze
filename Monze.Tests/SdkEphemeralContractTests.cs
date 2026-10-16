@@ -50,7 +50,7 @@ public sealed class SdkEphemeralContractTests
     }
 
     [Fact]
-    public async Task Published_sdk_marks_button_actor_as_server_authenticated()
+    public async Task Published_sdk_marks_button_actor_as_client_supplied()
     {
         var router = new InteractionRouter();
         router.OnButton("contract", _ => Task.CompletedTask)
@@ -77,7 +77,6 @@ public sealed class SdkEphemeralContractTests
             (MessageButtonClickedEventData)response,
             CancellationToken.None);
 
-        Assert.NotEqual(InteractionExecutionResult.Unauthorized, result);
-        Assert.NotEqual(InteractionExecutionResult.NotHandled, result);
+        Assert.Equal(InteractionExecutionResult.Unauthorized, result);
     }
 }
