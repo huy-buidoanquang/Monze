@@ -17,7 +17,7 @@ namespace Monze.Tests.E2E.Workflows;
 /// click is handled only when the binding's user is the clicking user.
 /// Honest clicks come from the user's own client; forged clicks are
 /// MessageButtonClicked events with a chosen user and message id, which
-/// mezon-api forwards unchanged and the SDK marks server-authenticated.
+/// mezon-api forwards unchanged and the SDK marks client-supplied.
 /// Honest rows must match the correct outcome. The one forged row Monze
 /// still accepts (R2: the owner's id forged on the owner's own card) can only
 /// be closed by mezon-api setting user_id from the session; it stays CAND-19.

@@ -1,3 +1,4 @@
+using Mezon.Net.Models;
 using Mezon.Net.Sdk;
 using Mezon.Net.Sdk.Commands;
 using Mezon.Net.Sdk.Interactions;
@@ -33,20 +34,25 @@ public sealed partial class MonzeBot
         // What UseCommands does, but under the handler token and drain (RunHandlerAsync).
         client.ChannelMessageReceived += evt =>
         {
-            _ = ObserveCommandAsync(RunHandlerAsync(token => commands.HandleMessageAsync(client, evt, token)));
+            if (((ChannelMessageResponse)evt).ClanId == 0)
+            {
+                return Task.CompletedTask;
+            }
+
+            _ = ObserveDetachedAsync(RunHandlerAsync(token => commands.HandleMessageAsync(client, evt, token)));
             return Task.CompletedTask;
         };
     }
 
-    private static async Task ObserveCommandAsync(Task command)
+    private static async Task ObserveDetachedAsync(Task handler)
     {
         try
         {
-            await command;
+            await handler;
         }
         catch (Exception)
         {
-            // HandleMessageAsync reports handler failures itself; as with UseCommands, nothing else is.
+            // HandleMessageAsync and the interaction dispatchers report handler failures themselves; as with UseCommands, nothing else is.
         }
     }
 
@@ -150,9 +156,15 @@ public sealed partial class MonzeBot
             MonzeButtonId.WelcomeCancel,
             HandleWelcomeCancelAsync);
         client.MessageButtonClicked += evt =>
-            RunHandlerAsync(token => DispatchButtonInteractionAsync(client, interactions, evt, token));
+        {
+            _ = ObserveDetachedAsync(RunHandlerAsync(token => DispatchButtonInteractionAsync(client, interactions, evt, token)));
+            return Task.CompletedTask;
+        };
         client.DropdownBoxSelected += evt =>
-            RunHandlerAsync(token => DispatchSelectInteractionAsync(client, interactions, evt, token));
+        {
+            _ = ObserveDetachedAsync(RunHandlerAsync(token => DispatchSelectInteractionAsync(client, interactions, evt, token)));
+            return Task.CompletedTask;
+        };
     }
 
     private void RegisterPrivateButton(
@@ -160,8 +172,7 @@ public sealed partial class MonzeBot
         string customId,
         InteractionHandler handler)
     {
-        router.OnButton(customId, context => InvokePrivateButtonAsync(customId, handler, context))
-            .RequireServerAuthenticatedActor();
+        router.OnButton(customId, context => InvokePrivateButtonAsync(customId, handler, context));
     }
 
     private async Task InvokePrivateButtonAsync(

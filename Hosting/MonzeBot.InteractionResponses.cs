@@ -188,9 +188,6 @@ public sealed partial class MonzeBot
 
     private Task<bool> EnsurePrivateInteractionAsync(IInteractionContext context)
     {
-        var serverAuthenticated = context.Interaction is IInteractionActor actor
-            && actor.ActorTrust == InteractionActorTrust.ServerAuthenticated;
-
         // Only the exact ephemeral message the bot sent to its owner is
         // accepted. The click's user id is client-supplied (mezon-api forwards
         // MessageButtonClicked unchanged), so a binding by user alone would let
@@ -204,30 +201,18 @@ public sealed partial class MonzeBot
 
         var canHandle = hasBinding
             && ownerId > 0
-            && ownerId == context.User.Id
-            && serverAuthenticated;
+            && ownerId == context.User.Id;
         if (canHandle)
         {
             return Task.FromResult(true);
         }
 
-        if (!serverAuthenticated)
-        {
-            _logger.LogWarning(
-                "Rejected interaction with client-supplied actor. Clan={ClanId}, Channel={ChannelId}, Message={MessageId}.",
-                context.Channel.ClanId,
-                context.Channel.Id,
-                messageId);
-        }
-        else
-        {
-            _logger.LogDebug(
-                "Private interaction rejected by binding. Clan={ClanId}, Channel={ChannelId}, Message={MessageId}, User={UserId}.",
-                context.Channel.ClanId,
-                context.Channel.Id,
-                messageId,
-                context.User.Id);
-        }
+        _logger.LogDebug(
+            "Private interaction rejected by binding. Clan={ClanId}, Channel={ChannelId}, Message={MessageId}, User={UserId}.",
+            context.Channel.ClanId,
+            context.Channel.Id,
+            messageId,
+            context.User.Id);
 
         return Task.FromResult(false);
     }

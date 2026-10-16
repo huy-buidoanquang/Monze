@@ -30,8 +30,6 @@ public sealed class CommandRoutingAreaTests
         var chat = await E2EActions.IgnoredAsync(host, () => host.Inbound.SayAsync(ClanId, GeneralId, MemberId, "hello monze"));
         var direct = await E2EActions.IgnoredAsync(host, () => host.Inbound.SayDirectAsync(DirectId, MemberId, "*monze help"));
         Assert.Equal(1, direct.DeliveredSessions);
-        // The SDK resolves the direct channel (clan 0) before giving up.
-        await host.Recorder.WaitForAsync(static action => action.Operation == SimOperations.ListChannelDetail && action.ChannelId == DirectId, E2EOracles.Timeout, mark.Sequence);
         await Task.Delay(300);
 
         // Regression for CAND-26: the ignored direct command is at least logged.
